@@ -162,6 +162,21 @@ static int complete_word(const char *buf, int pos, char **out) {
             }
             str_free(&dir);
         }
+        if (g_opt_autoopen) {
+            DIR *dp = opendir(".");
+            if (dp) {
+                struct dirent *de;
+                while ((de = readdir(dp))) {
+                    if (strlen(de->d_name) < (size_t)wlen) continue;
+                    if (memcmp(de->d_name, prefix, wlen)) continue;
+                    if (de->d_name[0] == '.' && prefix[0] != '.') continue;
+                    struct stat st;
+                    if (stat(de->d_name, &st) == 0 && !S_ISDIR(st.st_mode))
+                        vec_push(&matches, xstrdup(de->d_name));
+                }
+                closedir(dp);
+            }
+        }
     } else {
         /* file completion with a directory part */
         Str dir; str_init(&dir);

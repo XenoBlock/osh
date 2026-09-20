@@ -471,6 +471,49 @@ static int b_exec(int argc, char **argv) {
 static int b_colon(int argc, char **argv) { (void)argc; (void)argv; return 0; }
 static int b_dot(int argc, char **argv) { return b_source(argc, argv); }
 
+static int b_osh_setvars(int argc, char **argv) {
+    if (argc < 2) {
+        printf("autoopen: %s\n", g_opt_autoopen ? "on" : "off");
+        return 0;
+    }
+    for (int i = 1; i < argc; i++) {
+        char *arg = argv[i];
+        char *eq = strchr(arg, '=');
+        char *key = arg;
+        char *val = NULL;
+        char kbuf[64] = {0};
+        if (eq) {
+            size_t klen = (size_t)(eq - arg);
+            if (klen >= sizeof(kbuf)) klen = sizeof(kbuf) - 1;
+            memcpy(kbuf, arg, klen);
+            kbuf[klen] = 0;
+            key = kbuf;
+            val = eq + 1;
+        } else if (i + 1 < argc && (argv[i + 1][0] != '-' && strchr(argv[i + 1], '=') == NULL)) {
+            val = argv[++i];
+        }
+
+        if (!strcmp(key, "autoopen") || !strcmp(key, "auto_open") || !strcmp(key, "open_without_dot_slash")) {
+            if (!val) {
+                printf("autoopen: %s\n", g_opt_autoopen ? "on" : "off");
+            } else if (!strcmp(val, "1") || !strcasecmp(val, "on") || !strcasecmp(val, "true") || !strcasecmp(val, "enable")) {
+                g_opt_autoopen = 1;
+            } else if (!strcmp(val, "0") || !strcasecmp(val, "off") || !strcasecmp(val, "false") || !strcasecmp(val, "disable")) {
+                g_opt_autoopen = 0;
+            } else {
+                fprintf(stderr, "osh: osh_setvars: invalid value '%s' for autoopen (use on/off or 1/0)\n", val);
+                return 1;
+            }
+        } else if (eq) {
+            var_set(key, val);
+        } else {
+            fprintf(stderr, "osh: osh_setvars: unknown option '%s'\n", key);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 Builtin builtins[] = {
     {"echo",    b_echo},    {"cd",      b_cd},
     {"pwd",     b_pwd},     {"true",    b_true},
@@ -491,6 +534,7 @@ Builtin builtins[] = {
     {"command", b_command}, {"eval",    b_eval},
     {"shift",   b_shift},   {"getopts", b_getopts},
     {"hash",    b_hash},    {"exec",    b_exec},
+    {"osh_setvars", b_osh_setvars},
     {":",       b_colon},
     {NULL,      NULL}
 };

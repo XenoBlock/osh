@@ -271,6 +271,14 @@ char *command_resolve(const char *name) {
         p = c + 1;
     }
     str_free(&cur);
+    if (g_opt_autoopen) {
+        struct stat st;
+        if (stat(name, &st) == 0 && !S_ISDIR(st.st_mode)) {
+            char pathbuf[PATH_MAX];
+            snprintf(pathbuf, sizeof(pathbuf), "./%s", name);
+            return xstrdup(pathbuf);
+        }
+    }
     return NULL;
 }
 
@@ -348,6 +356,49 @@ static int run_function(const char *name, int argc, char **argv) {
 }
 
 /* ---------- simple command ---------- */
+/* execute an external command with optional auto-open fallback */
+static void exec_external_cmd(char **argv) {
+    execvp(argv[0], argv);
+    if (errno == ENOENT && g_opt_autoopen && !strchr(argv[0], '/')) {
+        struct stat st;
+        if (stat(argv[0], &st) == 0 && !S_ISDIR(st.st_mode)) {
+            /* Try running as a script directly if it has execute permission */
+            if (access(argv[0], X_OK) == 0) {
+                char pathbuf[PATH_MAX];
+                snprintf(pathbuf, sizeof(pathbuf), "./%s", argv[0]);
+                execvp(pathbuf, argv);
+            }
+            /* Otherwise, open it with system/user opener (XDG_OPEN / PAGER / EDITOR / xdg-open) */
+            const char *opener = var_get("OSH_OPENER");
+            if (!opener || !*opener) opener = var_get("OPENER");
+            if (!opener || !*opener) {
+                if (access("/usr/bin/xdg-open", X_OK) == 0) opener = "xdg-open";
+                else if (access("/bin/xdg-open", X_OK) == 0) opener = "xdg-open";
+                else opener = var_get("PAGER");
+            }
+            if (!opener || !*opener) opener = var_get("EDITOR");
+            if (!opener || !*opener) opener = "cat";
+
+            /* Count argv */
+            int c = 0;
+            while (argv[c]) c++;
+            char **new_argv = xmalloc(sizeof(char *) * (c + 2));
+            new_argv[0] = (char *)opener;
+            for (int j = 0; j < c; j++) new_argv[j + 1] = argv[j];
+            new_argv[c + 1] = NULL;
+            execvp(opener, new_argv);
+            /* fallback to cat if opener fails */
+            if (strcmp(opener, "cat") != 0) {
+                new_argv[0] = "cat";
+                execvp("cat", new_argv);
+            }
+            free(new_argv);
+        }
+    }
+    fprintf(stderr, "osh: %s: %s\n", argv[0], errno == ENOENT ? "command not found" : strerror(errno));
+    _exit(errno == ENOENT ? 127 : 126);
+}
+
 int exec_simple(Node *n) {
     /* assignment-only command */
     if (n->nargs == 0) {
@@ -437,9 +488,7 @@ int exec_simple(Node *n) {
         apply_assigns(n, 1);
         var_export_all();
         trace_command(argv);
-        execvp(argv[0], argv);
-        fprintf(stderr, "osh: %s: %s\n", argv[0], errno == ENOENT ? "command not found" : strerror(errno));
-        _exit(errno == ENOENT ? 127 : 126);
+        exec_external_cmd(argv);
     }
     free_argv(argv);
     int st;
@@ -494,9 +543,7 @@ static int exec_pipe(Node *n, int bg) {
                 apply_assigns(stage, 1);
                 var_export_all();
                 trace_command(argv);
-                execvp(argv[0], argv);
-                fprintf(stderr, "osh: %s: %s\n", argv[0], errno == ENOENT ? "command not found" : strerror(errno));
-                _exit(127);
+                exec_external_cmd(argv);
             }
             exec_node(stage, 0);
             _exit(g_status);
@@ -609,15 +656,28 @@ static int exec_compound(Node *n, int bg) {
         return rc;
     }
     case N_IF: {
-        exec_node(n->a, 0);
-        if (g_flow != FLOW_NONE) return g_status;
-        if (g_status == 0) return exec_node(n->b, 0);
-        if (n->c) return exec_node(n->c, 0);
-        return 0;
+        int s0 = dup(0), s1 = dup(1), s2 = dup(2);
+        n_saved = 0;
+        int rc;
+        if (apply_redirs(n) < 0) rc = 1;
+        else {
+            exec_node(n->a, 0);
+            if (g_flow != FLOW_NONE) rc = g_status;
+            else if (g_status == 0) rc = exec_node(n->b, 0);
+            else if (n->c) rc = exec_node(n->c, 0);
+            else rc = 0;
+        }
+        restore_redirs();
+        dup2(s0, 0); dup2(s1, 1); dup2(s2, 2);
+        close(s0); close(s1); close(s2);
+        return rc;
     }
     case N_WHILE: case N_UNTIL: {
+        int s0 = dup(0), s1 = dup(1), s2 = dup(2);
+        n_saved = 0;
         int rc = 0, is_while = (n->kind == N_WHILE);
-        for (;;) {
+        if (apply_redirs(n) < 0) rc = 1;
+        else for (;;) {
             exec_node(n->a, 0);
             if (g_flow != FLOW_NONE) break;
             if (is_while ? (g_status != 0) : (g_status == 0)) break;
@@ -625,48 +685,68 @@ static int exec_compound(Node *n, int bg) {
             if (g_flow != FLOW_NONE) break;
         }
         if (g_flow == FLOW_BREAK || g_flow == FLOW_CONTINUE) g_flow = FLOW_NONE;
+        restore_redirs();
+        dup2(s0, 0); dup2(s1, 1); dup2(s2, 2);
+        close(s0); close(s1); close(s2);
         g_status = rc;
         return rc;
     }
     case N_FOR: {
-        Vec values; vec_init(&values);
-        if (n->nargs_set) {
-            for (int i = 0; i < n->nargs; i++)
-                expand_word(&n->args[i], &values, EX_SPLIT | EX_GLOB);
-        } else {
-            for (int i = 0; i < g_nposargs; i++)
-                vec_push(&values, xstrdup(g_posargs[i]));
-        }
+        int s0 = dup(0), s1 = dup(1), s2 = dup(2);
+        n_saved = 0;
         int rc = 0;
-        for (int i = 0; i < values.len; i++) {
-            var_set(n->var, (char *)vec_at(&values, i));
-            rc = exec_node(n->a, 0);
-            if (g_flow == FLOW_BREAK) { g_flow = FLOW_NONE; break; }
-            if (g_flow == FLOW_CONTINUE) { g_flow = FLOW_NONE; continue; }
-            if (g_flow == FLOW_RETURN) break;
+        if (apply_redirs(n) < 0) rc = 1;
+        else {
+            Vec values; vec_init(&values);
+            if (n->nargs_set) {
+                for (int i = 0; i < n->nargs; i++)
+                    expand_word(&n->args[i], &values, EX_SPLIT | EX_GLOB);
+            } else {
+                for (int i = 0; i < g_nposargs; i++)
+                    vec_push(&values, xstrdup(g_posargs[i]));
+            }
+            for (int i = 0; i < values.len; i++) {
+                var_set(n->var, (char *)vec_at(&values, i));
+                rc = exec_node(n->a, 0);
+                if (g_flow == FLOW_BREAK) { g_flow = FLOW_NONE; break; }
+                if (g_flow == FLOW_CONTINUE) { g_flow = FLOW_NONE; continue; }
+                if (g_flow == FLOW_RETURN) break;
+            }
+            vec_free(&values);
         }
-        vec_free(&values);
+        restore_redirs();
+        dup2(s0, 0); dup2(s1, 1); dup2(s2, 2);
+        close(s0); close(s1); close(s2);
         return rc;
     }
     case N_CASE: {
-        Vec v; vec_init(&v);
-        expand_word(&n->args[0], &v, EX_SPLIT | EX_GLOB);
-        char *word = v.len ? xstrdup((char *)vec_at(&v, 0)) : xstrdup("");
-        vec_free(&v);
-        int rc = 0;
-        for (Node *b = n->a; b; b = b->b) {
-            for (int i = 0; i < b->nargs; i++) {
-                Vec pv; vec_init(&pv);
-                expand_word(&b->args[i], &pv, 0);
-                char *pat = pv.len ? xstrdup((char *)vec_at(&pv, 0)) : xstrdup("");
-                vec_free(&pv);
-                int hit = gmatch_c(word, pat);
-                free(pat);
-                if (hit) { rc = exec_node(b->a, 0); break; }
+        int s0 = dup(0), s1 = dup(1), s2 = dup(2);
+        n_saved = 0;
+        int rc;
+        if (apply_redirs(n) < 0) rc = 1;
+        else {
+            Vec v; vec_init(&v);
+            expand_word(&n->args[0], &v, EX_SPLIT | EX_GLOB);
+            char *word = v.len ? xstrdup((char *)vec_at(&v, 0)) : xstrdup("");
+            vec_free(&v);
+            rc = 0;
+            for (Node *b = n->a; b; b = b->b) {
+                for (int i = 0; i < b->nargs; i++) {
+                    Vec pv; vec_init(&pv);
+                    expand_word(&b->args[i], &pv, 0);
+                    char *pat = pv.len ? xstrdup((char *)vec_at(&pv, 0)) : xstrdup("");
+                    vec_free(&pv);
+                    int hit = gmatch_c(word, pat);
+                    free(pat);
+                    if (hit) { rc = exec_node(b->a, 0); break; }
+                }
+                if (g_flow != FLOW_NONE) break;
             }
-            if (g_flow != FLOW_NONE) break;
+            free(word);
         }
-        free(word);
+        restore_redirs();
+        dup2(s0, 0); dup2(s1, 1); dup2(s2, 2);
+        close(s0); close(s1); close(s2);
         return rc;
     }
     default: return 0;

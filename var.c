@@ -26,6 +26,7 @@ int g_opt_errexit = 0, g_opt_xtrace = 0, g_opt_unset = 0, g_opt_noglob = 0;
 int g_opt_allexport = 0, g_opt_ignoreeof = 0, g_opt_notify = 0;
 int g_opt_braceexpand = 1, g_opt_clobber = 1, g_opt_pipefail = 0;
 int g_opt_histexpand = 0, g_opt_verbose = 0;
+int g_opt_autoopen = 1;
 int g_lineno = 0;
 
 /* ---------- scopes ---------- */
@@ -104,6 +105,7 @@ static struct { char letter; int *flag; } optlist[] = {
     {'C', &g_opt_clobber},   {'p', &g_opt_pipefail},
     {'b', &g_opt_notify},    {'h', &g_opt_ignoreeof},
     {'H', &g_opt_histexpand},{'v', &g_opt_verbose},
+    {'O', &g_opt_autoopen},
     {0, NULL}
 };
 const char *option_string(void) {

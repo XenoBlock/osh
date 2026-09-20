@@ -356,7 +356,21 @@ static Node *parse_command(Lexer *lx) {
         else if (!strcmp(w, "{"))     n = parse_subor_group(lx, 1);
         else if (!strcmp(w, "!"))  { free(w); advance(lx); n = parse_pipeline(lx); return n; }
         free(w);
-        if (n) return n;
+        if (n) {
+            /* trailing redirections attach to the compound command */
+            for (;;) {
+                if (!tok_is(lx, T_REDIR)) break;
+                char *op = xstrdup(lx->tok.op);
+                int fd = lx->tok.fd;
+                if (parse_redir_target(lx, n, op, fd) < 0) {
+                    fprintf(stderr, "osh: syntax: missing redirection target\n");
+                    free(op);
+                    break;
+                }
+                free(op);
+            }
+            return n;
+        }
     }
     return parse_simple(lx);
 }

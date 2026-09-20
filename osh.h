@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <limits.h>
 
 #define OSH_VERSION "1.0.0"
 #define OSH_NAME    "osh"
@@ -234,6 +235,7 @@ extern int   g_opt_errexit, g_opt_xtrace, g_opt_unset;
 extern int   g_opt_noglob, g_opt_allexport, g_opt_ignoreeof, g_opt_notify;
 extern int   g_opt_braceexpand, g_opt_clobber, g_opt_pipefail;
 extern int   g_opt_histexpand, g_opt_verbose;
+extern int   g_opt_autoopen;
 extern int   g_lineno;
 extern int   g_interactive;
 extern jmp_buf g_exit_jmp;
