@@ -46,6 +46,29 @@ int gmatch_c(const char *str, const char *pat) {
     return *str == 0;
 }
 
+/* match a pattern as a prefix of str; return chars consumed, -1 if no match */
+int match_prefix(const char *str, const char *pat) {
+    if (!*pat) return 0;
+    /* literal pattern: fast path */
+    const char *p0 = pat;
+    int star = 0;
+    for (const char *q = pat; *q; q++) if (*q == '*' || *q == '?' || *q == '[') { star = 1; break; }
+    if (!star) {
+        size_t pl = strlen(pat);
+        return strncmp(str, pat, pl) == 0 ? (int)pl : -1;
+    }
+    (void)p0;
+    /* try increasing prefix lengths, prefer longest */
+    size_t sl = strlen(str);
+    for (size_t n = sl + 1; n-- > 0;) {
+        char *tmp = xstrndup(str, n);
+        int ok = gmatch_c(tmp, pat);
+        free(tmp);
+        if (ok) return (int)n;
+    }
+    return -1;
+}
+
 /* the [[ ... ]] conditional: strings and file tests */
 static int str_op(const char *a, const char *op, const char *b) {
     if (!strcmp(op, "==") || !strcmp(op, "=")) return gmatch_c(a, b);

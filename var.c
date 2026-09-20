@@ -576,6 +576,71 @@ static char *expand_param_body(const char *body) {
         return r;
     }
 
+    /* ${var:offset:length} substring extraction */
+    if (*p == ':') {
+        const char *peek = p + 1;
+        while (*peek == ' ' || *peek == '\t') peek++;
+        if (isdigit((unsigned char)*peek) || (*peek == '-' && isdigit((unsigned char)peek[1])) ||
+            *peek == '\0') {
+            p = peek;
+            long off = 0;
+            int neg = (*p == '-');
+            if (neg) p++;
+            while (isdigit((unsigned char)*p)) { off = off * 10 + (*p - '0'); p++; }
+            if (neg) off = -off;
+            long len = -1;
+            if (*p == ':') {
+                p++;
+                len = 0;
+                while (isdigit((unsigned char)*p)) { len = len * 10 + (*p - '0'); p++; }
+            }
+            const char *base = val ? val : "";
+            size_t bl = strlen(base);
+            size_t start = off < 0 ? (size_t)((long)bl + off < 0 ? 0 : (long)bl + off)
+                                   : (size_t)off;
+            if (start > bl) start = bl;
+            size_t take = (len < 0) ? bl - start : (size_t)len;
+            if (start + take > bl) take = bl - start;
+            char *r = xstrndup(base + start, take);
+            free(special); free(name);
+            return r;
+        }
+    }
+
+    /* ${var/pat/repl} and ${var//pat/repl} substitution */
+    if (*p == '/') {
+        int all = (p[1] == '/');
+        p += 1 + all;
+        const char *patstart = p;
+        while (*p && *p != '/') p++;
+        char *pat = xstrndup(patstart, p - patstart);
+        if (*p == '/') p++;
+        const char *rep = p;
+        const char *base = val ? val : "";
+        Str res; str_init(&res);
+        size_t i = 0, bl = strlen(base);
+        if (!*pat) {           /* empty pattern: no substitution */
+            str_puts(&res, base);
+        } else for (;;) {
+            int n = match_prefix(base + i, pat);
+            if (n >= 0) {
+                str_puts(&res, rep);
+                i += (size_t)n;
+                if (!n) i++;             /* always advance to avoid spinning */
+                if (!all) { str_puts(&res, base + i); break; }
+                if (i >= bl) break;
+                continue;
+            }
+            if (i >= bl) break;
+            str_putc(&res, base[i]);
+            i++;
+        }
+        free(pat);
+        char *r = str_done(&res);
+        free(special); free(name);
+        return r;
+    }
+
     int colon = 0;
     if (*p == ':') { colon = 1; p++; }
     char op = *p;

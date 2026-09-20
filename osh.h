@@ -283,6 +283,7 @@ const char *trap_get(const char *name);
 extern Map g_traps;
 void  var_mark_exportl(const char *name, size_t nlen);
 int   gmatch_c(const char *str, const char *pat);
+int   match_prefix(const char *str, const char *pat);
 void  node_to_source(Node *n, Str *s);
 
 /* ---------------- builtin support ---------------- */

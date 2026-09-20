@@ -278,6 +278,7 @@ int main(int argc, char **argv) {
     if (cmd) {
         g_interactive = 0;
         run_string(cmd);
+        trap_run(0);
         return g_status;
     }
     if (i < argc) {
@@ -291,6 +292,7 @@ int main(int argc, char **argv) {
         for (int k = 0; k < g_nposargs; k++) g_posargs[k] = xstrdup(argv[i + 1 + k]);
         shell_signals_init();
         run_file(f);
+        trap_run(0);
         fclose(f);
         return g_status;
     }
@@ -301,5 +303,6 @@ int main(int argc, char **argv) {
         shell_signals_init();
         run_file(stdin);
     }
+    trap_run(0);
     return g_status;
 }

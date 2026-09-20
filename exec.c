@@ -108,7 +108,17 @@ void shell_signals_init(void) {
 Map g_traps = {0};
 void trap_set(const char *name, const char *body) { map_put(&g_traps, name, body); }
 const char *trap_get(const char *name) { return map_get(&g_traps, name); }
-void trap_run(int sig) { (void)sig; }
+void trap_run(int sig) {
+    const char *names[] = { "EXIT", "INT", "ERR", "TERM", "HUP", NULL };
+    const char *body = NULL;
+    if (sig == 0) body = map_get(&g_traps, "EXIT");
+    else if (sig >= 1 && sig <= 4) body = map_get(&g_traps, names[sig]);
+    if (!body || !*body) return;
+    int saved_flow = g_flow;
+    g_flow = FLOW_NONE;
+    run_string(body);
+    g_flow = saved_flow;
+}
 
 /* ---------- redirection application ---------- */
 typedef struct { int fd; int saved; } SavedFd;
