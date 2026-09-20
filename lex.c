@@ -209,7 +209,7 @@ static int read_word(Lexer *lx, Token *tok) {
             read_quote(lx, (char)c, &seg);
             word_add(&tok->word, seg.buf, c == '"' ? 1 : 2);
             str_clear(&seg);
-            qcur = 0;
+            qcur = 0;               /* quote consumed its own terminator */
             continue;
         }
         if (c == '$' && lex_peekc(lx) == '(') {

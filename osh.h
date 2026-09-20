@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <limits.h>
+#include <pwd.h>
 
 #define OSH_VERSION "1.0.0"
 #define OSH_NAME    "osh"
@@ -90,6 +91,7 @@ void expand_str(const char *s, Vec *out, int flags);
 long long arith_eval(const char *expr);
 void var_set(const char *name, const char *val);
 void var_setl(const char *name, size_t nlen, const char *val);
+void var_import_env(void);
 const char *var_get(const char *name);
 void var_mark_export(const char *name);
 void var_export_all(void);

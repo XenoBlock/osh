@@ -253,6 +253,7 @@ int main(int argc, char **argv) {
     int selftest = 0;
 
     setenv("SHELL", "osh", 0);
+    var_import_env();
     var_set("PS1", "\\u@\\h:\\w\\$ ");
     var_set("PS2", "> ");
     var_set("IFS", " \t\n");

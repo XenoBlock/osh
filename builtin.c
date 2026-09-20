@@ -118,6 +118,16 @@ static int b_set(int argc, char **argv) {
         return 0;
     }
     for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--")) {
+            i++;
+            /* remaining args become the positional parameters */
+            int n = argc - i;
+            for (int k = 0; k < g_nposargs; k++) free(g_posargs[k]);
+            g_posargs = xrealloc(g_posargs, (size_t)(n ? n : 1) * sizeof(char *));
+            for (int k = 0; k < n; k++) g_posargs[k] = xstrdup(argv[i + k]);
+            g_nposargs = n;
+            return 0;
+        }
         if (argv[i][0] == '-') set_shell_options_from(argv[i] + 1);
         else if (argv[i][0] == '+') { /* not implemented: leave as-is */ }
         else {

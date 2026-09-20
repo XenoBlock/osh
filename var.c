@@ -54,6 +54,22 @@ int scope_is_local(const char *name) {
 }
 
 /* ---------- variables ---------- */
+/* lazy import of the process environment; called on first var access */
+extern char **environ;
+static int g_env_imported = 0;
+void var_import_env(void) {
+    if (g_env_imported) return;
+    g_env_imported = 1;
+    for (char **e = environ; e && *e; e++) {
+        char *eq = strchr(*e, '=');
+        if (!eq) continue;
+        size_t nl = eq - *e;
+        char *nm = xstrndup(*e, nl);
+        map_put(&g_vars, nm, eq + 1);
+        free(nm);
+    }
+}
+
 void var_set(const char *name, const char *val) {
     for (Scope *s = g_scopes; s; s = s->prev)
         if (map_get(&s->vars, name)) { map_put(&s->vars, name, val); return; }
@@ -66,6 +82,7 @@ void var_setl(const char *name, size_t nlen, const char *val) {
     free(tmp);
 }
 const char *var_get(const char *name) {
+    if (!g_vars.cap && !g_vars.keys) var_import_env();
     for (Scope *s = g_scopes; s; s = s->prev) {
         const char *v = map_get(&s->vars, name);
         if (v) return v;
@@ -952,6 +969,29 @@ void expand_word(Word *w, Vec *out, int flags) {
     str_init(&cur); str_init(&qmask);
     for (int i = 0; i < w->n; i++)
         expand_into(w->s[i].text, w->s[i].q, &cur, &qmask);
+    /* tilde expansion on the unquoted result: leading ~ or ~user */
+    if (cur.len && cur.buf[0] == '~' && (!qmask.len || qmask.buf[0] == 0)) {
+        const char *rest = cur.buf + 1;
+        const char *slash = strchr(rest, '/');
+        size_t ulen = slash ? (size_t)(slash - rest) : strlen(rest);
+        const char *home = NULL;
+        if (ulen == 0) home = var_get("HOME");
+        else {
+            char *user = xstrndup(rest, ulen);
+            struct passwd *pw = getpwnam(user);
+            home = pw ? pw->pw_dir : NULL;
+            free(user);
+        }
+        if (home) {
+            Str tmp; str_init(&tmp);
+            str_puts(&tmp, home);
+            str_puts(&tmp, slash ? slash : "");
+            Str qm; str_init(&qm);
+            for (size_t k = 0; k < tmp.len; k++) str_putc(&qm, 1);
+            str_free(&cur); str_free(&qmask);
+            cur = tmp; qmask = qm;
+        }
+    }
     split_and_push(&cur, &qmask, (flags & EX_SPLIT) != 0, (flags & EX_GLOB) != 0, out);
     str_free(&cur); str_free(&qmask);
 }

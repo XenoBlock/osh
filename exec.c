@@ -818,15 +818,30 @@ void node_to_str(Node *n, Str *s) {
 }
 
 /* render a node back to shell source text (used to store function bodies) */
+/* re-add quotes so re-parsed function bodies keep quoting semantics */
+static void word_to_source(Word *w, Str *s) {
+    int prev_q = 0;
+    for (int i = 0; i < w->n; i++) {
+        int q = w->s[i].q;
+        if (q && !prev_q) str_putc(s, '"');
+        else if (!q && prev_q) str_putc(s, '"');
+        const char *t = w->s[i].text;
+        for (const char *p = t; *p; p++) {
+            if (q && (*p == '"' || *p == '\\')) str_putc(s, '\\');
+            str_putc(s, *p);
+        }
+        prev_q = q;
+    }
+    if (prev_q) str_putc(s, '"');
+}
+
 void node_to_source(Node *n, Str *s) {
     if (!n) return;
     switch (n->kind) {
     case N_CMD:
         for (int i = 0; i < n->nargs; i++) {
             if (i) str_putc(s, ' ');
-            char *raw = word_raw(&n->args[i]);
-            str_puts(s, raw);
-            free(raw);
+            word_to_source(&n->args[i], s);
         }
         for (int i = 0; i < n->nredirs; i++) {
             Redir *r = &n->redirs[i];
@@ -846,9 +861,7 @@ void node_to_source(Node *n, Str *s) {
             case R_INOUT: str_puts(s, "<>"); break;
             }
             str_putc(s, ' ');
-            char *raw = word_raw(&r->target);
-            str_puts(s, raw ? raw : "");
-            free(raw);
+            word_to_source(&r->target, s);
         }
         break;
     case N_PIPE:
