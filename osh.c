@@ -217,6 +217,20 @@ static void test_expansion(void) {
     check_str("single quotes", var_get("s"), "single");
 }
 
+static void test_param_expansion(void) {
+    run_string("s=hello");
+    check_str("${var:1:3}", expand_param_str("s:1:3"), "ell");
+    check_str("${var:2}", expand_param_str("s:2"), "llo");
+    check_str("${var: -2}", expand_param_str("s: -2"), "lo");
+    check_str("${#var}", expand_param_str("#s"), "5");
+    check_str("${var/llo/LLO}", expand_param_str("s/llo/LLO"), "heLLO");
+    check_str("${var//l/L}", expand_param_str("s//l/L"), "heLLo");
+    check_str("${var/h*/H}", expand_param_str("s/h*/H"), "H");
+    check_str("${X:-def}", expand_param_str("X:-def"), "def");
+    run_string("X=; ${X:=set}");
+    check_str("${X:=set}", var_get("X"), "set");
+}
+
 static void run_self_test(void) {
     fprintf(stderr, "osh " OSH_VERSION " self-test\n");
     test_arith();
@@ -225,6 +239,7 @@ static void run_self_test(void) {
     test_flow();
     test_builtins();
     test_expansion();
+    test_param_expansion();
     fprintf(stderr, "%d tests, %d failures\n", tests_run, tests_fail);
     exit(tests_fail ? 1 : 0);
 }

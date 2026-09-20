@@ -687,6 +687,9 @@ static char *expand_param_body(const char *body) {
     return result;
 }
 
+/* public wrapper for self-test */
+char *expand_param_str(const char *body) { return expand_param_body(body); }
+
 /* ---------- command substitution ---------- */
 char *capture_subshell(const char *body, int capture_output) {
     int fds[2];
