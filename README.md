@@ -6,7 +6,10 @@ osh adalah shell Unix ringan (lightweight) yang ditulis dalam C murni (C11), dir
 
 - **Lexer & Parser Sadar Konteks**: Mendukung quote tunggal/ganda, escaping `\`, operator logika (`&&`, `||`), pipe (`|`), rantai perintah (`;`), dan backgrounding (`&`).
 - **Ekspansi Parameter & Variabel**:
-  - `$VAR`, `${VAR}`, `${VAR:-default}`, `${VAR:+alternate}`, `${#VAR}`
+  - `$VAR`, `${VAR}`, `${VAR:-default}`, `${VAR:+alternate}`, `${VAR:?err}`, `${VAR:=val}`
+  - Substring: `${VAR:offset}`, `${VAR:offset:length}`, `${VAR: -n}`
+  - Substitusi: `${VAR/pat/repl}`, `${VAR//pat/repl}` (mendukung glob pattern)
+  - Panjang: `${#VAR}`
   - Variabel khusus: `$?`, `$$`, `$#`, `$!`, `$*`, `$@`, `$0`, `$-`
   - Command substitution: `$(cmd)` dan `` `cmd` ``
   - Aritmatika terintegrasi: `$(( expr ))` mendukung operasi matematika dasar dan dereferensi variabel/argumen `$1`.
@@ -14,6 +17,7 @@ osh adalah shell Unix ringan (lightweight) yang ditulis dalam C murni (C11), dir
   - Input (`<`), Output (`>`), Append (`>>`), Clobber (`>|`)
   - File descriptor redirection (`2>&1`, `2>file`, `1>&2`)
   - Here-documents (`<<EOF`, `<<-EOF`) dan Here-strings (`<<<`)
+  - Redirection menempel pada compound command: `while ...; done < file`
 - **Struktur Kontrol Alur**:
   - `if ... then ... elif ... else ... fi`
   - `for var in ...; do ...; done`
@@ -31,6 +35,9 @@ osh adalah shell Unix ringan (lightweight) yang ditulis dalam C murni (C11), dir
 - **Builtin Shell (~40 perintah)**:
   - `cd`, `pwd`, `echo` (opsi `-n`, `-e`), `printf`, `export`, `unset`
   - `type`, `source` / `.`, `test` / `[`, `read`, `eval`, `exit`, dll.
+- **Job Control & Sinyal**:
+  - Background job dengan `&`, `jobs`, `wait`, `kill`
+  - `trap` untuk `EXIT`, `INT`, `ERR`, `TERM`, `HUP`
 
 ## Kompilasi & Menjalankan
 
