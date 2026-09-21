@@ -19,8 +19,14 @@ osh: $(OBJ)
 check: osh
 	./osh --self-test
 
+# Scratch files left behind by manual test runs (kept out of git).
+SCRAP = c.txt dq fo.txt i.txt n0 n1 n2 n3 n4 o.txt r1 r2 r3 w.txt
+
 clean:
-	rm -f osh $(OBJ)
+	rm -f osh $(OBJ) $(SCRAP) core *.core
+
+distclean: clean
+	rm -f .osh_history
 
 install: osh
 	install -d $(DESTDIR)$(BINDIR)
@@ -29,4 +35,4 @@ install: osh
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/osh
 
-.PHONY: all check clean install uninstall
+.PHONY: all check clean distclean install uninstall

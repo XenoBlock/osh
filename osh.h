@@ -16,7 +16,7 @@
 #include <limits.h>
 #include <pwd.h>
 
-#define OSH_VERSION "1.0.1"
+#define OSH_VERSION "1.0.1 >.-"
 #define OSH_NAME    "osh"
 #define HIST_MAX    2000
 #define HIST_FILE   ".osh_history"
