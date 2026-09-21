@@ -35,6 +35,11 @@ input.c/Reader  -->  lex.c (Lexer, Token, word segments with quote mask)
                 -->  var.c (expand_word: params, cmdsub, split, glob)
 ```
 
+`session.c` is a separate entry point: `osh --session ID` forks a server that
+owns the shell state and runs commands with fd 0/1/2 pointed at whichever
+client is currently attached. Clients are byte relays; takeover is a control
+line (leading `0x01`) sent between commands.
+
 Key invariants that are easy to break:
 
 - **Quote mask (`q`)**: every word segment carries `0` (unquoted), `1`
@@ -90,6 +95,11 @@ Key invariants that are easy to break:
 - No line editing beyond the raw termios loop; no readline, no multibyte
   awareness.
 - Globbing does not sort or support `extglob`.
+- Sessions are a plain byte stream: remote clients get the terminal driver's
+  line editing, not the raw-mode editor, and Ctrl-C cannot interrupt a running
+  command (upgrade path: a pty pair per client).
+- Completion matches by prefix only: no glob-aware completion, and `$VAR`
+  candidates come from the global and function scopes.
 
 ## Do not
 

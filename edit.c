@@ -46,8 +46,10 @@ static char *hist_file_path(void) {
 
 void edit_load_history(void) {
     char *path = hist_file_path();
-    FILE *f = fopen(path, "r");
-    if (!f) { free(path); return; }
+    int fd = open_user_file(path, 0);
+    if (fd < 0) { free(path); return; }
+    FILE *f = fdopen(fd, "r");
+    if (!f) { close(fd); free(path); return; }
     Str line; str_init(&line);
     int c;
     while ((c = getc(f)) != EOF) {
@@ -64,8 +66,10 @@ void edit_load_history(void) {
 
 void edit_save_history(void) {
     char *path = hist_file_path();
-    FILE *f = fopen(path, "w");
-    if (!f) { free(path); return; }
+    int fd = open_user_file(path, 1);
+    if (fd < 0) { free(path); return; }
+    FILE *f = fdopen(fd, "w");
+    if (!f) { close(fd); free(path); return; }
     int start = hist_count > HIST_MAX ? hist_count - HIST_MAX : 0;
     for (int i = start; i < hist_count; i++) {
         fputs(hist[i], f);
@@ -97,6 +101,9 @@ static void raw_off(void) {
 void edit_init(void) {
     editor_ok = isatty(0) && isatty(1);
     edit_load_history();
+    /* `exit` longjmps straight out of the interactive loop, so register the
+       save here instead of only at the bottom of run_interactive(). */
+    atexit(edit_save_history);
 }
 
 void edit_disable(void) { editor_ok = 0; }
@@ -113,7 +120,27 @@ static void refresh(const char *prompt, const char *buf, int pos, int len) {
 }
 
 /* ---------------- completion ---------------- */
+static int cmp_str(const void *a, const void *b) {
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* sort matches and drop duplicates (frees the discarded strings) */
+static void vec_sort_uniq(Vec *v) {
+    if (v->len < 2) return;
+    qsort(v->data, (size_t)v->len, sizeof(void *), cmp_str);
+    int w = 1;
+    for (int i = 1; i < v->len; i++) {
+        if (!strcmp((char *)v->data[i], (char *)v->data[w - 1])) free(v->data[i]);
+        else v->data[w++] = v->data[i];
+    }
+    v->len = w;
+}
+
+/* Complete the word ending at `pos`. Returns 0 if nothing matched, 1 if a
+ * unique match was found, 2 if several did (the candidates are listed and the
+ * longest common prefix is offered). *out is the text to append at `pos`. */
 static int complete_word(const char *buf, int pos, char **out) {
+    *out = NULL;
     /* find the word to complete */
     int start = pos;
     while (start > 0 && !strchr(" \t;|&()<>", buf[start - 1])) start--;
@@ -121,9 +148,27 @@ static int complete_word(const char *buf, int pos, char **out) {
     if (wlen == 0) return 0;
     char *prefix = xstrndup(buf + start, wlen);
     int has_slash = strchr(prefix, '/') != NULL;
+    int pad_space = 0;      /* command/variable names get a trailing space */
     Vec matches; vec_init(&matches);
 
-    if (!has_slash) {
+    if (prefix[0] == '$') {
+        /* $VAR and ${VAR completion */
+        const char *nm = prefix + 1;
+        int brace = (nm[0] == '{');
+        if (brace) nm++;
+        Vec names; vec_init(&names);
+        var_names_matching(nm, &names);
+        for (int i = 0; i < names.len; i++) {
+            Str m; str_init(&m);
+            str_putc(&m, '$');
+            if (brace) str_putc(&m, '{');
+            str_puts(&m, (char *)names.data[i]);
+            if (brace) str_putc(&m, '}');
+            vec_push(&matches, str_done(&m));
+        }
+        vec_free(&names);
+        pad_space = 1;
+    } else if (!has_slash) {
         /* builtins + functions + PATH lookup */
         for (Builtin *b = builtins; b->name; b++)
             if (strlen(b->name) >= (size_t)wlen && !memcmp(b->name, prefix, wlen))
@@ -177,6 +222,7 @@ static int complete_word(const char *buf, int pos, char **out) {
                 closedir(dp);
             }
         }
+        pad_space = 1;
     } else {
         /* file completion with a directory part */
         Str dir; str_init(&dir);
@@ -209,7 +255,18 @@ static int complete_word(const char *buf, int pos, char **out) {
     free(prefix);
 
     if (matches.len == 0) { vec_free(&matches); return 0; }
-    /* common prefix */
+    vec_sort_uniq(&matches);
+
+    /* one match: append just the part that was not typed yet */
+    if (matches.len == 1) {
+        Str s; str_init(&s);
+        str_puts(&s, (char *)matches.data[0] + wlen);
+        if (pad_space) str_putc(&s, ' ');
+        *out = str_done(&s);
+        vec_free(&matches);
+        return 1;
+    }
+    /* many matches: offer the longest common prefix, then list them */
     size_t common = strlen((char *)matches.data[0]);
     for (int i = 1; i < matches.len; i++) {
         size_t l = strlen((char *)matches.data[i]);
@@ -217,14 +274,8 @@ static int complete_word(const char *buf, int pos, char **out) {
         for (size_t j = 0; j < common; j++)
             if (((char *)matches.data[i])[j] != ((char *)matches.data[0])[j]) { common = j; break; }
     }
-    /* if only one match, insert it */
-    if (matches.len == 1) {
-        *out = (char *)matches.data[0];
-        free(matches.data);
-        return 1;
-    }
-    /* many matches: complete the common part and list them */
-    *out = xstrndup((char *)matches.data[0], common);
+    if (common > (size_t)wlen)
+        *out = xstrndup((char *)matches.data[0] + wlen, common - (size_t)wlen);
     fputs("\n", stdout);
     for (int i = 0; i < matches.len; i++)
         printf("%s  ", (char *)matches.data[i]);
@@ -447,24 +498,15 @@ char *edit_getline(const char *prompt_raw) {
         case 9: {                             /* Tab: completion */
             char *insert = NULL;
             int r = complete_word(buf.buf, pos, &insert);
-            if (r == 1 && insert) {
+            if (insert) {
                 size_t il = strlen(insert);
                 str_grow(&buf, il);
                 memmove(buf.buf + pos + il, buf.buf + pos, (size_t)(len - pos));
                 memcpy(buf.buf + pos, insert, il);
                 len += (int)il; buf.len = (size_t)len; pos += (int)il;
                 free(insert);
-                refresh(prompt, buf.buf, pos, len);
-            } else if (r == 2 && insert) {
-                /* common prefix inserted; list was printed */
-                size_t il = strlen(insert);
-                str_grow(&buf, il);
-                memmove(buf.buf + pos + il, buf.buf + pos, (size_t)(len - pos));
-                memcpy(buf.buf + pos, insert, il);
-                len += (int)il; buf.len = (size_t)len; pos += (int)il;
-                free(insert);
-                refresh(prompt, buf.buf, pos, len);
             }
+            if (r) refresh(prompt, buf.buf, pos, len);
             continue;
         }
         case '\r': case '\n':                 /* submit */

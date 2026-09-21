@@ -16,7 +16,7 @@
 #include <limits.h>
 #include <pwd.h>
 
-#define OSH_VERSION "1.0.0"
+#define OSH_VERSION "1.0.1"
 #define OSH_NAME    "osh"
 #define HIST_MAX    2000
 #define HIST_FILE   ".osh_history"
@@ -61,6 +61,7 @@ size_t map_next_used(Map *m, size_t i);  /* next used slot index >= i, or m->cap
 char *tilde_expand(const char *s);          /* ~ or ~user (malloc'd) */
 const char *home_dir(void);
 int   is_directory(const char *p);
+int   open_user_file(const char *path, int write);
 int   is_executable(const char *p);
 
 /* globbing without libc glob(): recursive matcher */
@@ -113,11 +114,13 @@ void scope_push(void);
 void scope_pop(void);
 void scope_set_local(const char *name, const char *val);
 int  scope_is_local(const char *name);
+void var_names_matching(const char *prefix, Vec *out);
 
 /* special parameter helpers */
 char *special_param(char c);   /* $? $# $! $$ $- $@ $* */
 char *positional_param(int n); /* malloc'd or NULL */
 void set_shell_options_from(const char *s);
+void clear_shell_options_from(const char *s);
 
 /* tilde/parameter expansion entry used by the lexer */
 char *do_word_expansion(const char *raw, int allow_split_and_glob, Vec *out);
@@ -238,7 +241,7 @@ extern int   g_status;
 extern pid_t g_last_bg;
 extern int   g_opt_errexit, g_opt_xtrace, g_opt_unset;
 extern int   g_opt_noglob, g_opt_allexport, g_opt_ignoreeof, g_opt_notify;
-extern int   g_opt_braceexpand, g_opt_clobber, g_opt_pipefail;
+extern int   g_opt_braceexpand, g_opt_noclobber, g_opt_pipefail;
 extern int   g_opt_histexpand, g_opt_verbose;
 extern int   g_opt_autoopen;
 extern int   g_lineno;
@@ -276,6 +279,10 @@ void  edit_add_history(const char *line);
 void  edit_save_history(void);
 void  edit_load_history(void);
 char *prompt_string(const char *ps);        /* expand PS escapes */
+
+/* ---------------- session.c ---------------- */
+int session_client(const char *id);         /* attach to (or start) a session */
+int session_id_ok(const char *id);          /* conservative id -> file name check */
 void  edit_disable(void);
 int   edit_complete(const char *buf, int pos, char **out, int *common);
 

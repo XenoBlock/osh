@@ -26,6 +26,7 @@ library and POSIX.
   - `if ... then ... elif ... else ... fi`
   - `for var in ...; do ...; done`
   - `while ...; do ...; done` / `until ...; do ...; done`
+  - `for (( init; cond; step )); do ...; done` (C-style)
   - `case ... in ... ;; ... esac`
   - Subshell `( ... )` and command group `{ ...; }`
   - `break`, `continue`, `return`
@@ -35,12 +36,16 @@ library and POSIX.
   - Arrow keys, Home/End, Backspace, Ctrl+A/E/U/K/L
   - History persisted to `~/.osh_history`
   - Custom prompt via `$PS1` (escapes `\u`, `\h`, `\w`, `\$`)
-  - Tab completion for executables and path names
+  - Tab completion for executables, path names and `$VAR` names
 - **~40 shell builtins**: `cd`, `pwd`, `echo`, `printf`, `export`, `unset`,
   `type`, `source`/`.`, `test`/`[`, `read`, `eval`, `exit`, and more
 - **Job control & signals**: background jobs with `&`, `jobs`, `wait`, `kill`,
   and `trap` for `EXIT`, `INT`, `ERR`, `TERM`, `HUP`
 - **Globbing**: `*`, `?`, `[...]` with recursive directory expansion
+- **Shared sessions**: `osh --session ID` attaches to a session that survives
+  disconnects. The first attach starts a session server that owns the shell
+  state; attaching again takes the session over and tells the displaced client
+  who took it and how to reconnect
 
 ## Build & run
 
@@ -88,6 +93,7 @@ Interactive mode with login rc file (`~/.oshrc`):
 | `-u`   | treat unset variables as errors                 |
 | `-x`   | print commands as they run (xtrace)             |
 | `-v`   | verbose: print input lines                      |
+| `--session ID` | attach to (or start) shared session ID  |
 
 ## Project layout
 
@@ -105,6 +111,7 @@ Interactive mode with login rc file (`~/.oshrc`):
 | `jobs.c`      | job table and status reporting                               |
 | `match.c`     | shell pattern matching and `[[ ]]` conditionals             |
 | `util.c`      | allocator, growable string/vector, hash map, path helpers   |
+| `session.c`   | shared "takeover" sessions over a UNIX socket               |
 | `Makefile`    | build and `check` target                                     |
 
 ## License

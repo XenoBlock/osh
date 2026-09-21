@@ -36,7 +36,8 @@ static void usage(void) {
 "  -v            verbose: print input lines\n"
 "  --version     print version and exit\n"
 "  --help        print this help and exit\n"
-"  --self-test   run the built-in test suite and exit\n",
+"  --self-test   run the built-in test suite and exit\n"
+"  --session ID  attach to (or start) shared session ID\n",
     stderr);
 }
 
@@ -231,6 +232,52 @@ static void test_param_expansion(void) {
     check_str("${X:=set}", var_get("X"), "set");
 }
 
+/* options that exist for safety, and the session id -> file name check */
+static void test_hardening(void) {
+    char tmpl[] = "/tmp/osh_selftest_XXXXXX";
+    char *dir = mkdtemp(tmpl);
+    char *cwd = getcwd(NULL, 0);
+    if (!dir || chdir(dir) != 0) { free(cwd); return; }
+
+    run_string("echo one > f");
+    check_status("set -C; echo two > f", 1);
+    char kept[8] = {0};
+    FILE *fp = fopen("f", "r");
+    if (fp) { size_t n = fread(kept, 1, sizeof kept - 1, fp); kept[n] = 0; fclose(fp); }
+    check_str("noclobber keeps content", kept, "one\n");
+    check_status("set -C; echo three >| f", 0);
+    check_status("set -C; echo fresh > new", 0);
+    run_string("set +C");
+    check_int("set +C clears noclobber", g_opt_noclobber, 0);
+    check_status("echo four > f", 0);
+
+    /* an unknown job must not fall through to kill(-1, sig) */
+    check_status("kill %999", 1);
+    check_status("kill -s 999 $$", 1);
+    check_status("kill -s", 1);
+
+    check_int("session id plain", session_id_ok("work"), 1);
+    check_int("session id punctuation", session_id_ok("a-b_1.2"), 1);
+    check_int("session id traversal", session_id_ok("../evil"), 0);
+    check_int("session id slash", session_id_ok("a/b"), 0);
+    check_int("session id empty", session_id_ok(""), 0);
+    check_int("session id dotdot", session_id_ok(".."), 0);
+    check_int("session id too long", session_id_ok(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), 0);
+
+    /* completion sources */
+    var_set("OSHZZFOO", "1");
+    var_set("OSHZZBAR", "2");
+    Vec v; vec_init(&v);
+    var_names_matching("OSHZZ", &v);
+    check_int("var completion matches", v.len, 2);
+    vec_free(&v);
+
+    if (cwd) { chdir(cwd); free(cwd); }
+    unlink("f"); unlink("new");
+    rmdir(dir);
+}
+
 static void run_self_test(void) {
     fprintf(stderr, "osh " OSH_VERSION " self-test\n");
     test_arith();
@@ -240,6 +287,7 @@ static void run_self_test(void) {
     test_builtins();
     test_expansion();
     test_param_expansion();
+    test_hardening();
     fprintf(stderr, "%d tests, %d failures\n", tests_run, tests_fail);
     exit(tests_fail ? 1 : 0);
 }
@@ -251,6 +299,7 @@ int main(int argc, char **argv) {
     const char *cmd = NULL;
     int opt_s = 0;
     int selftest = 0;
+    const char *session = NULL;
 
     setenv("SHELL", "osh", 0);
     var_import_env();
@@ -269,6 +318,11 @@ int main(int argc, char **argv) {
         }
         if (!strcmp(argv[i], "--help")) { usage(); return 0; }
         if (!strcmp(argv[i], "--self-test")) { selftest = 1; continue; }
+        if (!strcmp(argv[i], "--session")) {
+            if (i + 1 >= argc) osh_die("--session: option requires an argument");
+            session = argv[++i];
+            continue;
+        }
         if (!strcmp(argv[i], "-c")) {
             if (i + 1 >= argc) osh_die("-c: option requires an argument");
             cmd = argv[++i];
@@ -290,6 +344,12 @@ int main(int argc, char **argv) {
         }
     }
     if (selftest) run_self_test();
+
+    if (session) {
+        /* the session server inherits this process's shell state */
+        load_rc();
+        return session_client(session);
+    }
 
     if (cmd) {
         g_interactive = 0;

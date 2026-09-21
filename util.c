@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include <pwd.h>
+#include <fcntl.h>
 
 void *xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
@@ -22,6 +23,7 @@ char *xstrdup(const char *s) {
 }
 
 char *xstrndup(const char *s, size_t n) {
+    if (n > (size_t)-1 - 1) { fprintf(stderr, "osh: out of memory\n"); _exit(1); }
     char *p = xmalloc(n + 1);
     memcpy(p, s, n);
     p[n] = 0;
@@ -40,9 +42,16 @@ void str_free(Str *s) { free(s->buf); str_init(s); }
 void str_clear(Str *s) { s->len = 0; if (s->buf) s->buf[0] = 0; }
 
 void str_grow(Str *s, size_t extra) {
-    if (s->len + extra + 1 <= s->cap) return;
+    if (extra > (size_t)-1 - 1) { fprintf(stderr, "osh: out of memory\n"); _exit(1); }
+    size_t need = extra + 1;
+    if (s->len > (size_t)-1 - need) { fprintf(stderr, "osh: out of memory\n"); _exit(1); }
+    size_t min = s->len + need;
+    if (min <= s->cap) return;
     size_t want = s->cap ? s->cap : 64;
-    while (want < s->len + extra + 1) want *= 2;
+    while (want < min) {
+        if (want > (size_t)-1 / 2) { want = min; break; }
+        want *= 2;
+    }
     s->buf = xrealloc(s->buf, want);
     s->cap = want;
 }
@@ -90,15 +99,17 @@ char *str_done(Str *s) {
 void vec_init(Vec *v) { v->data = NULL; v->len = 0; v->cap = 0; }
 
 void vec_push(Vec *v, void *p) {
-    if (v->len + 1 > v->cap) {
+    if (v->len >= v->cap) {
+        if (v->cap > 0x3fffffff) { fprintf(stderr, "osh: out of memory\n"); _exit(1); }
         v->cap = v->cap ? v->cap * 2 : 8;
-        v->data = xrealloc(v->data, v->cap * sizeof(void *));
+        v->data = xrealloc(v->data, (size_t)v->cap * sizeof(void *));
     }
     v->data[v->len++] = p;
 }
 
 void vec_free(Vec *v) {   /* frees the void* pointers themselves */
     for (int i = 0; i < v->len; i++) free(v->data[i]);
+    free(v->data);
     vec_init(v);
 }
 
@@ -178,9 +189,10 @@ int map_del(Map *m, const char *k) {
     while (m->used[j]) {
         if (strcmp(m->keys[j], k) == 0) {
             free(m->keys[j]); free(m->vals[j]);
+            m->keys[j] = NULL; m->vals[j] = NULL;
             m->used[j] = 0;
             m->size--;
-            /* backward-shift for open addressing */
+            /* backward-shift for open addressing; move pointers, do not free */
             size_t next = (j + 1) & (m->cap - 1);
             while (m->used[next]) {
                 size_t want = map_hash(m->keys[next]) & (m->cap - 1);
@@ -189,7 +201,6 @@ int map_del(Map *m, const char *k) {
                 if (dist >= dj) {
                     m->keys[j] = m->keys[next]; m->vals[j] = m->vals[next];
                     m->used[j] = 1; m->used[next] = 0;
-                    free(m->keys[next]); free(m->vals[next]);
                     m->keys[next] = NULL; m->vals[next] = NULL;
                     j = next;
                 } else break;
@@ -228,7 +239,9 @@ char *tilde_expand(const char *s) {
     }
     const char *slash = strchr(s, '/');
     size_t ulen = slash ? (size_t)(slash - s) - 1 : strlen(s + 1);
-    struct passwd *pw = getpwnam(xstrndup(s + 1, ulen));
+    char *user = xstrndup(s + 1, ulen);
+    struct passwd *pw = getpwnam(user);
+    free(user);
     if (!pw) return NULL;
     const char *rest = slash ? slash : "";
     size_t pl = strlen(pw->pw_dir);
@@ -241,4 +254,21 @@ char *tilde_expand(const char *s) {
 int is_directory(const char *p) {
     struct stat st;
     return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* Open a per-user conf/history file. write=0 read, write=1 create/trunc 0600.
+ * Rejects non-regular files and files not owned by the current user.
+ * Writes do not follow symlinks (O_NOFOLLOW). */
+int open_user_file(const char *path, int write) {
+    int flags = write ? (O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW) : O_RDONLY;
+    flags |= O_CLOEXEC;
+    int fd = open(path, flags, 0600);
+    if (fd < 0) return -1;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != getuid()) {
+        close(fd);
+        return -1;
+    }
+    if (write) fchmod(fd, 0600);
+    return fd;
 }

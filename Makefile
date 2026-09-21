@@ -5,7 +5,7 @@ LDFLAGS ?=
 PREFIX  ?= /usr/local
 BINDIR  ?= $(PREFIX)/bin
 
-SRC = osh.c input.c util.c var.c lex.c parse.c exec.c builtin.c edit.c jobs.c match.c
+SRC = osh.c input.c util.c var.c lex.c parse.c exec.c builtin.c edit.c jobs.c match.c session.c
 OBJ = $(SRC:.c=.o)
 
 all: osh

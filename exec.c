@@ -159,7 +159,7 @@ static int apply_redir(Redir *r) {
         close(pfd[1]);
         if (r->type == R_HERESTR) free(body);
         target_fd = pfd[0];
-        save_fd(r->fd);
+        if (save_fd(r->fd) != 0) { close(target_fd); return -1; }
         dup2(target_fd, r->fd);
         close(target_fd);
         return 0;
@@ -179,7 +179,11 @@ static int apply_redir(Redir *r) {
     const char *path = expanded_target;
     if (!path) return -1;
     int fd = r->fd;
-    save_fd(fd);
+    if (save_fd(fd) != 0) {
+        fprintf(stderr, "osh: too many nested redirections\n");
+        free(expanded_target);
+        return -1;
+    }
     switch (r->type) {
     case R_IN: {
         int f = open(path, O_RDONLY);
@@ -187,7 +191,12 @@ static int apply_redir(Redir *r) {
         dup2(f, fd); close(f);
         break;
     }
-    case R_OUT:
+    case R_OUT: {
+        int f = open(path, O_WRONLY | O_CREAT | O_TRUNC | (g_opt_noclobber ? O_EXCL : 0), 0644);
+        if (f < 0) { fprintf(stderr, "osh: %s: %s\n", path, strerror(errno)); return -1; }
+        dup2(f, fd); close(f);
+        break;
+    }
     case R_CLOBBER: {
         int f = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (f < 0) { fprintf(stderr, "osh: %s: %s\n", path, strerror(errno)); return -1; }

@@ -24,7 +24,7 @@ Scope *g_scopes = NULL;
 
 int g_opt_errexit = 0, g_opt_xtrace = 0, g_opt_unset = 0, g_opt_noglob = 0;
 int g_opt_allexport = 0, g_opt_ignoreeof = 0, g_opt_notify = 0;
-int g_opt_braceexpand = 1, g_opt_clobber = 1, g_opt_pipefail = 0;
+int g_opt_braceexpand = 1, g_opt_noclobber = 0, g_opt_pipefail = 0;
 int g_opt_histexpand = 0, g_opt_verbose = 0;
 int g_opt_autoopen = 1;
 int g_lineno = 0;
@@ -47,6 +47,22 @@ void scope_set_local(const char *name, const char *val) {
     if (!g_scopes) { var_set(name, val); return; }
     map_put(&g_scopes->vars, name, val);
 }
+/* names of visible variables starting with `prefix` (for completion) */
+void var_names_matching(const char *prefix, Vec *out) {
+    size_t pl = strlen(prefix);
+    for (size_t i = map_next_used(&g_vars, 0); i < g_vars.cap;
+         i = map_next_used(&g_vars, i + 1)) {
+        const char *nm = g_vars.keys[i];
+        if (nm && strlen(nm) >= pl && !memcmp(nm, prefix, pl)) vec_push(out, xstrdup(nm));
+    }
+    for (Scope *sc = g_scopes; sc; sc = sc->prev)
+        for (size_t i = map_next_used(&sc->vars, 0); i < sc->vars.cap;
+             i = map_next_used(&sc->vars, i + 1)) {
+            const char *nm = sc->vars.keys[i];
+            if (nm && strlen(nm) >= pl && !memcmp(nm, prefix, pl)) vec_push(out, xstrdup(nm));
+        }
+}
+
 int scope_is_local(const char *name) {
     for (Scope *s = g_scopes; s; s = s->prev)
         if (map_get(&s->vars, name)) return 1;
@@ -119,7 +135,7 @@ static struct { char letter; int *flag; } optlist[] = {
     {'e', &g_opt_errexit},   {'u', &g_opt_unset},
     {'x', &g_opt_xtrace},    {'f', &g_opt_noglob},
     {'a', &g_opt_allexport}, {'B', &g_opt_braceexpand},
-    {'C', &g_opt_clobber},   {'p', &g_opt_pipefail},
+    {'C', &g_opt_noclobber}, {'p', &g_opt_pipefail},
     {'b', &g_opt_notify},    {'h', &g_opt_ignoreeof},
     {'H', &g_opt_histexpand},{'v', &g_opt_verbose},
     {'O', &g_opt_autoopen},
@@ -137,6 +153,11 @@ void set_shell_options_from(const char *s) {
     for (; *s; s++)
         for (int i = 0; optlist[i].letter; i++)
             if (optlist[i].letter == *s) { *optlist[i].flag = 1; break; }
+}
+void clear_shell_options_from(const char *s) {
+    for (; *s; s++)
+        for (int i = 0; optlist[i].letter; i++)
+            if (optlist[i].letter == *s) { *optlist[i].flag = 0; break; }
 }
 
 static int unset_strict(void) { return g_opt_unset; }

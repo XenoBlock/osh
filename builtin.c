@@ -129,7 +129,7 @@ static int b_set(int argc, char **argv) {
             return 0;
         }
         if (argv[i][0] == '-') set_shell_options_from(argv[i] + 1);
-        else if (argv[i][0] == '+') { /* not implemented: leave as-is */ }
+        else if (argv[i][0] == '+') clear_shell_options_from(argv[i] + 1);
         else {
             char *eq = strchr(argv[i], '=');
             if (eq) { *eq = 0; var_set(argv[i], eq + 1); *eq = '='; }
@@ -236,12 +236,16 @@ static int b_kill(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "osh: kill: usage: kill [-s sig] pid|job\n"); return 1; }
     int sig = SIGTERM;
     int i = 1;
-    if (argv[i][0] == '-' && argv[i][1] == 's') { sig = atoi(argv[++i]); i++; }
-    else if (argv[i][0] == '-') { sig = atoi(argv[i] + 1); i++; }
+    if (argv[i][0] == '-' && argv[i][1] == 's') {
+        if (++i >= argc) { fprintf(stderr, "osh: kill: -s needs a signal\n"); return 1; }
+        sig = atoi(argv[i++]);
+    } else if (argv[i][0] == '-') sig = atoi(argv[i++] + 1);
+    if (sig < 1 || sig > NSIG) { fprintf(stderr, "osh: kill: invalid signal %d\n", sig); return 1; }
     for (; i < argc; i++) {
         pid_t pid;
         if (argv[i][0] == '%') pid = job_pid(atoi(argv[i] + 1));
         else pid = atoi(argv[i]);
+        if (pid <= 0) { fprintf(stderr, "osh: kill: '%s': no such job\n", argv[i]); return 1; }
         if (kill(pid, sig) != 0) { fprintf(stderr, "osh: kill: %s\n", strerror(errno)); return 1; }
     }
     return 0;
