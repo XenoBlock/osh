@@ -1,0 +1,1 @@
+osh: arithmetic: division by zero

@@ -42,6 +42,7 @@ static void usage(void) {
 "  --self-test   run the built-in test suite and exit\n"
 "  --session ID  attach to (or start) shared session ID\n"
 "  --list-session    list shared session IDs\n"
+"  --kill-session ID terminate (or clean up) session ID\n"
 "  --new-session     start a new generated session\n"
 "                   detach from a session with Ctrl-S then Ctrl-D\n",
     stderr);
@@ -389,6 +390,10 @@ int main(int argc, char **argv) {
             continue;
         }
         if (!strcmp(argv[i], "--list-session")) { list_sessions = 1; continue; }
+        if (!strcmp(argv[i], "--kill-session")) {
+            if (i + 1 >= argc) osh_die("--kill-session: option requires an argument");
+            return session_kill(argv[++i]);
+        }
         if (!strcmp(argv[i], "--new-session")) { owned_session = new_session_id(); session = owned_session; continue; }
         if (!strcmp(argv[i], "-c")) {
             if (i + 1 >= argc) osh_die("-c: option requires an argument");

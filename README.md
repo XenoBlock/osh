@@ -44,9 +44,10 @@ library and POSIX.
 - **Globbing**: `*`, `?`, `[...]` with recursive directory expansion
 - **Shared sessions**: `osh --session ID` attaches to a session that survives
   disconnects. `osh --new-session` starts a generated session, `osh --list-session`
-  lists session IDs, and Ctrl-S then Ctrl-D detaches without killing the session.
-  Attaching again takes the session over and tells the displaced client who took
-  it and how to reconnect
+  lists live sessions with their PID, `osh --kill-session ID` terminates a session
+  (or cleans up a crashed one), and Ctrl-S then Ctrl-D detaches without killing
+  the session. Attaching again takes the session over and tells the displaced
+  client who took it and how to reconnect
 
 ## Build & run
 
@@ -97,6 +98,7 @@ Interactive mode with login rc file (`~/.oshrc`):
 | `--session ID` | attach to (or start) shared session ID  |
 | `--new-session` | start a generated shared session        |
 | `--list-session` | list shared session IDs                 |
+| `--kill-session ID` | terminate (or clean up) session ID    |
 
 ## Project layout
 

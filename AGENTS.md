@@ -38,8 +38,11 @@ input.c/Reader  -->  lex.c (Lexer, Token, word segments with quote mask)
 `session.c` is a separate entry point: `osh --session ID` forks a server that
 owns the shell state and runs commands with fd 0/1/2 pointed at whichever
 client is currently attached. `osh --new-session` generates a session ID,
-`osh --list-session` lists existing IDs, and Ctrl-S then Ctrl-D detaches from
-a session without killing it. Clients are byte relays; takeover is a control
+`osh --list-session` lists live sessions with their PID, `osh --kill-session ID`
+terminates a server or cleans up the files a crashed one left behind, and Ctrl-S
+then Ctrl-D detaches from a session without killing it. The server records its
+PID in `<dir>/<id>.pid` next to the socket and exports `$OSH_SESSION` so scripts
+and prompts can tell they are inside a session. Clients are byte relays; takeover is a control
 line (leading `0x01`) sent between commands.
 
 Key invariants that are easy to break:

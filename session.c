@@ -52,6 +52,12 @@ static char *sess_sock_path(const char *id) {
     return str_done(&s);
 }
 
+static int write_all(int fd, const char *buf, size_t n);
+static char *sess_pid_path(const char *id);
+static int  sess_pid_of(const char *id, pid_t *out);
+static void sess_remove_files(const char *id);
+static void sess_sigterm(int sig);
+
 int session_list(void) {
     char *dir = sess_dir();
     DIR *dp = opendir(dir);
@@ -64,7 +70,13 @@ int session_list(void) {
         size_t n = strlen(de->d_name);
         if (n <= 5 || strcmp(de->d_name + n - 5, ".sock")) continue;
         char *id = xstrndup(de->d_name, n - 5);
-        if (session_id_ok(id)) puts(id);
+        if (session_id_ok(id)) {
+            pid_t p;
+            if (sess_pid_of(id, &p) && kill(p, 0) == 0)
+                printf("%-16s pid %d\n", id, (int)p);
+            else
+                printf("%-16s not running\n", id);
+        }
         free(id);
     }
     closedir(dp);
@@ -90,6 +102,73 @@ static int write_all(int fd, const char *buf, size_t n) {
         if (w < 0) { if (errno == EINTR) continue; return -1; }
         buf += w; n -= (size_t)w;
     }
+    return 0;
+}
+
+/* The server records its pid next to the socket so that a stale session
+ * (killed with SIGKILL, or crashed) can be told apart from a live one. */
+static char *sess_pid_path(const char *id) {
+    char *d = sess_dir();
+    Str s; str_init(&s);
+    str_printf(&s, "%s/%s.pid", d, id);
+    free(d);
+    return str_done(&s);
+}
+
+static int sess_pid_of(const char *id, pid_t *out) {
+    char *path = sess_pid_path(id);
+    int fd = open_user_file(path, 0);
+    free(path);
+    if (fd < 0) return 0;
+    char pb[32];
+    ssize_t n = read(fd, pb, sizeof pb - 1);
+    close(fd);
+    if (n <= 0) return 0;
+    pb[n] = 0;
+    char *end;
+    long p = strtol(pb, &end, 10);
+    if (end == pb || p <= 0) return 0;
+    *out = (pid_t)p;
+    return 1;
+}
+
+static void sess_remove_files(const char *id) {
+    char *sock = sess_sock_path(id);
+    char *pidf = sess_pid_path(id);
+    unlink(sock);
+    unlink(pidf);
+    free(sock);
+    free(pidf);
+}
+
+static void sess_sigterm(int sig) { (void)sig; exit(0); }
+
+/* Terminate a session server, or clean up its leftovers if it is already gone. */
+int session_kill(const char *id) {
+    if (!session_id_ok(id)) {
+        fprintf(stderr, "osh: session: invalid session id '%s'\n", id ? id : "");
+        return 2;
+    }
+    pid_t p;
+    if (!sess_pid_of(id, &p)) {
+        fprintf(stderr, "osh: session: '%s': no pid record\n", id ? id : "");
+        return 2;
+    }
+    if (kill(p, 0) != 0) {
+        sess_remove_files(id);
+        printf("osh: session: '%s' was not running; cleaned up\n", id);
+        return 0;
+    }
+    if (kill(p, SIGTERM) != 0) {
+        fprintf(stderr, "osh: session: kill %d: %s\n", (int)p, strerror(errno));
+        return 2;
+    }
+    for (int i = 0; i < 100; i++) {
+        if (kill(p, 0) != 0) break;
+        usleep(10000);
+    }
+    sess_remove_files(id);
+    printf("osh: session: '%s' terminated\n", id);
     return 0;
 }
 
@@ -121,9 +200,11 @@ static void sess_send_prompt(int fd) {
 }
 
 static char *g_sess_path = NULL;   /* server: socket to unlink on exit */
+static char *g_pid_path = NULL;
 
 static void sess_unlink(void) {
-    if (g_sess_path) unlink(g_sess_path);
+    if (g_sess_path) { unlink(g_sess_path); free(g_sess_path); g_sess_path = NULL; }
+    if (g_pid_path)  { unlink(g_pid_path);  free(g_pid_path);  g_pid_path = NULL; }
 }
 
 /* Owns the shell state; runs until `exit` is executed in the session. */
@@ -156,6 +237,16 @@ static int session_server(const char *id) {
     }
     chmod(g_sess_path, 0600);
     if (listen(lfd, 8) != 0) return 2;
+    g_pid_path = sess_pid_path(id);
+    int pfd = open_user_file(g_pid_path, 1);
+    if (pfd >= 0) {
+        char pb[32];
+        int pl = snprintf(pb, sizeof pb, "%d\n", (int)getpid());
+        write_all(pfd, pb, (size_t)pl);
+        close(pfd);
+    }
+    /* SIGTERM should leave through exit() so atexit can unlink the files. */
+    signal(SIGTERM, sess_sigterm);
     atexit(sess_unlink);
 
     /* No controlling terminal: never die from a client's stray signal. */
@@ -165,6 +256,7 @@ static int session_server(const char *id) {
     g_interactive = 0;
 
     int active = -1;
+    var_set("OSH_SESSION", id);
     Str pend; str_init(&pend);
 
     for (;;) {

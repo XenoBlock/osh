@@ -285,6 +285,7 @@ char *prompt_string(const char *ps);        /* expand PS escapes */
 int session_client(const char *id);         /* attach to (or start) a session */
 int session_id_ok(const char *id);          /* conservative id -> file name check */
 int session_list(void);                     /* print live session IDs */
+int session_kill(const char *id);           /* terminate or clean a session */
 int   edit_complete(const char *buf, int pos, char **out, int *common);
 
 /* ---------- exec.c extras ---------- */
