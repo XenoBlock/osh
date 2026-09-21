@@ -759,6 +759,53 @@ static int exec_compound(Node *n, int bg) {
         close(s0); close(s1); close(s2);
         return rc;
     }
+    case N_ARITH_FOR: {
+        /* for (( init; cond; step )) */
+        int s0 = dup(0), s1 = dup(1), s2 = dup(2);
+        n_saved = 0;
+        int rc = 0;
+        if (apply_redirs(n) < 0) rc = 1;
+        else {
+            if (n->var && *n->var) arith_eval(n->var);
+            for (;;) {
+                if (n->cond && *n->cond) {
+                    long long v = arith_eval(n->cond);
+                    if (!v) break;
+                }
+                rc = exec_node(n->a, 0);
+                if (g_flow == FLOW_BREAK) { g_flow = FLOW_NONE; break; }
+                if (g_flow == FLOW_CONTINUE) { g_flow = FLOW_NONE; }
+                if (g_flow == FLOW_RETURN) break;
+                if (n->step && *n->step) arith_eval(n->step);
+            }
+        }
+        restore_redirs();
+        dup2(s0, 0); dup2(s1, 1); dup2(s2, 2);
+        close(s0); close(s1); close(s2);
+        return rc;
+    }
+    case N_TEST: {
+        /* [[ ... ]]: expand args without splitting/globbing, then evaluate */
+        Vec argv; vec_init(&argv);
+        for (int i = 0; i < n->nargs; i++) {
+            Vec wv; vec_init(&wv);
+            expand_word(&n->args[i], &wv, 0);
+            if (wv.len) vec_push(&argv, xstrdup((char *)wv.data[0]));
+            else vec_push(&argv, xstrdup(""));
+            vec_free(&wv);
+        }
+        int argc = (int)argv.len + 2;
+        char **av = xmalloc(sizeof(char *) * (argc + 1));
+        av[0] = xstrdup("test");
+        for (int i = 0; i < (int)argv.len; i++) av[i + 1] = xstrdup((char *)argv.data[i]);
+        av[argc - 1] = xstrdup("]");
+        av[argc] = 0;
+        int rc = test_eval(argc, av) ? 0 : 1;
+        for (int i = 0; i < argc; i++) free(av[i]);
+        free(av); vec_free(&argv);
+        g_status = rc;
+        return rc;
+    }
     default: return 0;
     }
 }

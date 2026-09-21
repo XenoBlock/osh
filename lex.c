@@ -103,7 +103,7 @@ void lex_init(Lexer *lx, Reader *r) {
 }
 
 /* pull one physical line into the buffer */
-static int lex_fill(Lexer *lx) {
+int lex_fill(Lexer *lx) {
     if (lx->eof) return 0;
     Str line; str_init(&line);
     int ok = reader_getline(lx->r, "> ", &line);

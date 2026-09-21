@@ -176,6 +176,7 @@ typedef struct Lexer {
 } Lexer;
 
 void   lex_init(Lexer *lx, Reader *r);
+int    lex_fill(Lexer *lx);
 void   lex_next(Lexer *lx);  /* fill lx->tok */
 void   lex_peek(Lexer *lx);
 void   token_free(Token *t);
@@ -205,11 +206,13 @@ typedef struct Node {
     int     nassigns;
     Redir  *redirs;
     int     nredirs;
-    char   *var;             /* N_FOR variable name */
+    char   *var;             /* N_FOR variable name / N_ARITH_FOR init */
+    char   *cond;            /* N_ARITH_FOR condition */
+    char   *step;            /* N_ARITH_FOR increment */
 } Node;
 
 enum { N_NONE, N_CMD, N_PIPE, N_AND, N_OR, N_SEQ, N_BG, N_SUB, N_GROUP,
-       N_IF, N_WHILE, N_UNTIL, N_FOR, N_CASE };
+       N_IF, N_WHILE, N_UNTIL, N_FOR, N_CASE, N_TEST, N_ARITH_FOR };
 
 Node *parse_line(Lexer *lx);       /* may request more input via reader */
 Node *parse_case_list(Lexer *lx);

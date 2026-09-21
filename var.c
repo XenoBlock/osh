@@ -385,7 +385,20 @@ static long long ap_primary(AP *a) {
     if (isalpha((unsigned char)*a->s) || *a->s == '_') {
         const char *st = a->s;
         while (isalnum((unsigned char)*a->s) || *a->s == '_') a->s++;
-        return ap_var_get(st, a->s);
+        const char *end = a->s;
+        ap_skip(a);
+        /* postfix ++ / -- : i++ increments and yields the old value */
+        if ((a->s[0] == '+' && a->s[1] == '+') ||
+            (a->s[0] == '-' && a->s[1] == '-')) {
+            long long old = ap_var_get(st, end);
+            long long nv = (a->s[0] == '+') ? old + 1 : old - 1;
+            char nmbuf[64];
+            snprintf(nmbuf, sizeof nmbuf, "%lld", nv);
+            var_setl(st, end - st, nmbuf);
+            a->s += 2;
+            return old;
+        }
+        return ap_var_get(st, end);
     }
     return 0;
 }
@@ -497,35 +510,47 @@ static long long ap_cond(AP *a) {
 }
 
 static long long ap_assign(AP *a) {
-    long long v = ap_cond(a);
+    /* recognize NAME = expr / NAME OP= expr and assign the variable */
     ap_skip(a);
-    char c = *a->s;
-    int compound = c && a->s[1] == '=' &&
-        (c == '+' || c == '-' || c == '*' || c == '/' || c == '%' ||
-         c == '&' || c == '|' || c == '^' || c == '<' || c == '>');
-    if (c == '=' || compound) {
-        a->s += compound ? 2 : 1;
-        long long r = ap_assign(a);
-        if (compound) {
-            switch (c) {
-            case '+': v += r; break;
-            case '-': v -= r; break;
-            case '*': v *= r; break;
-            case '/': v = r ? v / r : 0; break;
-            case '%': v = r ? v % r : 0; break;
-            case '&': v &= r; break;
-            case '|': v |= r; break;
-            case '^': v ^= r; break;
-            case '<': v <<= r; break;
-            case '>': v >>= r; break;
+    const char *st = a->s;
+    if (isalpha((unsigned char)*a->s) || *a->s == '_') {
+        while (isalnum((unsigned char)*a->s) || *a->s == '_') a->s++;
+        const char *en = a->s;
+        ap_skip(a);
+        char c = *a->s;
+        int compound = c && a->s[1] == '=' &&
+            (c == '+' || c == '-' || c == '*' || c == '/' || c == '%' ||
+             c == '&' || c == '|' || c == '^');
+        if (c == '=' || compound) {
+            size_t nl = en - st;
+            a->s += compound ? 2 : 1;
+            long long r = ap_assign(a);
+            long long v = r;
+            if (compound) {
+                char nm[128];
+                snprintf(nm, sizeof nm, "%.*s", (int)nl, st);
+                long long cur = 0;
+                const char *cv = var_get(nm);
+                if (cv) cur = atoll(cv);
+                switch (c) {
+                case '+': v = cur + r; break;
+                case '-': v = cur - r; break;
+                case '*': v = cur * r; break;
+                case '/': v = r ? cur / r : 0; break;
+                case '%': v = r ? cur % r : 0; break;
+                case '&': v = cur & r; break;
+                case '|': v = cur | r; break;
+                case '^': v = cur ^ r; break;
+                }
             }
-        } else v = r;
-        Str tmp; str_init(&tmp);
-        str_printf(&tmp, "%lld", v);
-        /* assignment target name is not tracked here: $((x=5)) sets x */
-        str_free(&tmp);
+            char nv[32];
+            snprintf(nv, sizeof nv, "%lld", v);
+            var_setl(st, nl, nv);
+            return v;
+        }
+        a->s = st;   /* not an assignment: reparse as expression */
     }
-    return v;
+    return ap_cond(a);
 }
 
 static long long ap_expr(AP *a) { return ap_assign(a); }

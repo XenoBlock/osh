@@ -31,6 +31,8 @@ void node_free(Node *n) {
     }
     free(n->redirs);
     free(n->var);
+    free(n->cond);
+    free(n->step);
     free(n);
 }
 
@@ -58,6 +60,14 @@ static void node_add_redir(Node *n, Redir *r) {
 }
 
 static int tok_is(Lexer *lx, TokType t) { return lx->tok.type == t; }
+
+static int is_keyword(const char *w) {
+    static const char *kw[] = { "if", "then", "elif", "else", "fi", "for",
+        "while", "until", "do", "done", "case", "esac", "in", "{", "}",
+        "function", "[[", "]]", "!","time", "select", NULL };
+    for (int i = 0; kw[i]; i++) if (!strcmp(w, kw[i])) return 1;
+    return 0;
+}
 
 static void advance(Lexer *lx) { advance_token(lx); }
 
@@ -208,6 +218,70 @@ static Node *parse_loop(Lexer *lx, int kind, const char *mid, const char *end) {
 }
 
 static Node *parse_for(Lexer *lx) {
+    /* for (( init; cond; step )); do ...; done  - C-style arithmetic loop */
+    size_t pi = lx->pos;
+    int got_paren = 0;
+    for (;;) {
+        while (pi < lx->len && (lx->buf[pi] == ' ' || lx->buf[pi] == '\t')) pi++;
+        if (pi < lx->len) { got_paren = (lx->buf[pi] == '('); break; }
+        if (!lex_fill(lx)) break;
+        pi = lx->pos;
+    }
+    if (got_paren) {
+        Node *n = new_node(N_ARITH_FOR);
+        advance(lx);                  /* consume the `for` token */
+        /* scan the raw buffer: skip the opening (( and read until )) */
+        size_t i2 = lx->pos;
+        while (i2 < lx->len && (lx->buf[i2] == ' ' || lx->buf[i2] == '\t')) i2++;
+        if (i2 + 1 < lx->len && lx->buf[i2] == '(' && lx->buf[i2 + 1] == '(') i2 += 2;
+        else if (i2 < lx->len && lx->buf[i2] == '(') i2++;   /* already past one ( */
+        Str expr; str_init(&expr);
+        int d = 0;
+        while (i2 < lx->len) {
+            char ch = lx->buf[i2];
+            if (ch == '(') { d++; str_putc(&expr, ch); i2++; continue; }
+            if (ch == ')') {
+                if (d == 0 && i2 + 1 < lx->len && lx->buf[i2 + 1] == ')') { i2 += 2; break; }
+                if (d == 0) { i2++; break; }
+                d--; str_putc(&expr, ch); i2++; continue;
+            }
+            if (ch == '\n') break;
+            str_putc(&expr, ch);
+            i2++;
+        }
+        lx->pos = i2;
+        /* re-lex so the parser continues after the arithmetic expression */
+        lx->have_peek = 0;
+        lex_next(lx);
+        /* split into init;cond;step by top-level semicolons */
+        char *parts[3] = {0, 0, 0};
+        int np = 0;
+        const char *p = expr.buf ? expr.buf : "";
+        const char *st = p;
+        for (; *p; p++) {
+            if (*p == '(') d++;
+            else if (*p == ')') d--;
+            else if (*p == ';' && d == 0 && np < 2) {
+                parts[np++] = xstrndup(st, p - st);
+                st = p + 1;
+            }
+        }
+        parts[np++] = xstrndup(st, p - st);
+        n->var = parts[0] ? parts[0] : xstrdup("");
+        n->cond = parts[1] ? parts[1] : xstrdup("");
+        n->step = parts[2] ? parts[2] : xstrdup("");
+        str_free(&expr);
+        if (tok_is(lx, T_SEMI)) advance(lx);
+        if (!tok_is(lx, T_WORD) || strcmp(word_raw(&lx->tok.word), "do")) {
+            fprintf(stderr, "osh: syntax: `do' expected\n");
+            node_free(n); return NULL;
+        }
+        advance(lx);
+        n->a = parse_list(lx);
+        if (tok_is(lx, T_WORD) && !strcmp(word_raw(&lx->tok.word), "done")) advance(lx);
+        return n;
+    }
+
     Node *n = new_node(N_FOR);
     advance(lx);
     if (!tok_is(lx, T_WORD)) { fprintf(stderr, "osh: syntax: `for' needs a name\n"); node_free(n); return NULL; }
@@ -338,16 +412,34 @@ static Node *parse_function(Lexer *lx) {
     return n;
 }
 
+/* [[ ... ]] conditional: collect words until ]] and evaluate at exec time */
+static Node *parse_cond(Lexer *lx) {
+    Node *n = new_node(N_TEST);
+    advance(lx);                       /* consume [[ */
+    for (;;) {
+        if (tok_is(lx, T_EOF) || tok_is(lx, T_NEWLINE)) break;
+        if (tok_is(lx, T_WORD)) {
+            char *w = word_raw(&lx->tok.word);
+            if (!strcmp(w, "]]")) { free(w); advance(lx); break; }
+            free(w);
+        }
+        node_add_arg(n, &lx->tok.word);
+        advance(lx);
+    }
+    return n;
+}
+
 static Node *parse_command(Lexer *lx) {
     if (tok_is(lx, T_LP)) return parse_subor_group(lx, 0);
     if (tok_is(lx, T_WORD)) {
         char *w = word_raw(&lx->tok.word);
         Node *n = NULL;
-        /* function definition: NAME ( ) ... */
-        if (word_unquoted(&lx->tok.word) && lx_looks_like_fn(lx)) {
+        /* function definition: NAME ( ) ... (but not for keywords) */
+        if (word_unquoted(&lx->tok.word) && lx_looks_like_fn(lx) && !is_keyword(w)) {
             free(w);
             return parse_function(lx);
         }
+        if (!strcmp(w, "[[")) { free(w); return parse_cond(lx); }
         if (!strcmp(w, "if"))        n = parse_if(lx);
         else if (!strcmp(w, "while")) n = parse_loop(lx, N_WHILE, "do", "done");
         else if (!strcmp(w, "until")) n = parse_loop(lx, N_UNTIL, "do", "done");
