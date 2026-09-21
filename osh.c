@@ -24,6 +24,7 @@ void osh_die(const char *fmt, ...) {
 static void usage(void) {
     fputs(
 "osh " OSH_VERSION " - Oricade Shell\n"
+"        >.-\n"
 "Usage: osh [options] [command | script]\n"
 "  -c cmd        run the string `cmd' and exit\n"
 "  -s            read commands from stdin (default with no script file)\n"
