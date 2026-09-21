@@ -20,7 +20,7 @@ check: osh
 	./osh --self-test
 
 # Scratch files left behind by manual test runs (kept out of git).
-SCRAP = c.txt dq fo.txt i.txt n0 n1 n2 n3 n4 o.txt r1 r2 r3 w.txt
+SCRAP = c.txt dq e.txt err.txt f fo.txt i.txt n0 n1 n2 n3 n4 o.txt r1 r2 r3 w.txt
 
 clean:
 	rm -f osh $(OBJ) $(SCRAP) core *.core
