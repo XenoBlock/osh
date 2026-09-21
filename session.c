@@ -114,7 +114,7 @@ static int session_server(const char *id) {
         return 2;
     }
     struct stat st;
-    if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != getuid()) {
+    if (lstat(dir, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != getuid() || (st.st_mode & 077) != 0) {
         fprintf(stderr, "osh: session: %s: refusing unsafe directory\n", dir);
         free(dir);
         return 2;

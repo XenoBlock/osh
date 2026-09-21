@@ -273,9 +273,18 @@ static void test_hardening(void) {
     var_names_matching("OSHZZ", &v);
     check_int("var completion matches", v.len, 2);
     vec_free(&v);
+    FILE *cf = fopen("compfile", "w");
+    if (cf) fclose(cf);
+    char *ins = NULL;
+    check_int("file completion after command", edit_complete("echo compf", 10, &ins, NULL), 1);
+    check_str("file completion suffix", ins ? ins : "", "ile ");
+    free(ins); ins = NULL;
+    check_int("command completion", edit_complete("ech", 3, &ins, NULL), 1);
+    check_str("command completion suffix", ins ? ins : "", "o ");
+    free(ins);
 
     if (cwd) { chdir(cwd); free(cwd); }
-    unlink("f"); unlink("new");
+    unlink("f"); unlink("new"); unlink("compfile");
     rmdir(dir);
 }
 

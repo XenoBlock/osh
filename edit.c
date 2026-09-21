@@ -136,6 +136,26 @@ static void vec_sort_uniq(Vec *v) {
     v->len = w;
 }
 
+static void add_file_matches(Vec *matches, const char *dir, const char *base, int with_dir) {
+    DIR *dp = opendir(dir && *dir ? dir : ".");
+    if (!dp) return;
+    size_t bl = strlen(base);
+    struct dirent *de;
+    while ((de = readdir(dp))) {
+        if (strlen(de->d_name) < bl) continue;
+        if (memcmp(de->d_name, base, bl)) continue;
+        if (de->d_name[0] == '.' && base[0] != '.') continue;
+        Str full; str_init(&full);
+        if (with_dir && dir) str_puts(&full, dir);
+        str_puts(&full, de->d_name);
+        struct stat st;
+        if (stat(full.buf, &st) == 0 && S_ISDIR(st.st_mode)) str_putc(&full, '/');
+        else str_putc(&full, ' ');
+        vec_push(matches, str_done(&full));
+    }
+    closedir(dp);
+}
+
 /* Complete the word ending at `pos`. Returns 0 if nothing matched, 1 if a
  * unique match was found, 2 if several did (the candidates are listed and the
  * longest common prefix is offered). *out is the text to append at `pos`. */
@@ -148,6 +168,10 @@ static int complete_word(const char *buf, int pos, char **out) {
     if (wlen == 0) return 0;
     char *prefix = xstrndup(buf + start, wlen);
     int has_slash = strchr(prefix, '/') != NULL;
+    int command_pos = 1;
+    for (int i = 0; i < start; i++) {
+        if (!strchr(" \t", buf[i])) command_pos = strchr(";|&()", buf[i]) != NULL;
+    }
     int pad_space = 0;      /* command/variable names get a trailing space */
     Vec matches; vec_init(&matches);
 
@@ -169,87 +193,54 @@ static int complete_word(const char *buf, int pos, char **out) {
         vec_free(&names);
         pad_space = 1;
     } else if (!has_slash) {
-        /* builtins + functions + PATH lookup */
-        for (Builtin *b = builtins; b->name; b++)
-            if (strlen(b->name) >= (size_t)wlen && !memcmp(b->name, prefix, wlen))
-                vec_push(&matches, xstrdup(b->name));
-        for (size_t i = map_next_used(&g_funs, 0); i < g_funs.cap; i = map_next_used(&g_funs, i + 1)) {
-            const char *nm = g_funs.keys[i];
-            if (strlen(nm) >= (size_t)wlen && !memcmp(nm, prefix, wlen))
-                vec_push(&matches, xstrdup(nm));
-        }
-        const char *path = var_get("PATH");
-        if (path) {
-            Str dir; str_init(&dir);
-            for (const char *p = path; ; ) {
-                const char *c = strchr(p, ':');
-                size_t seg = c ? (size_t)(c - p) : strlen(p);
-                str_clear(&dir);
-                str_putn(&dir, p, seg);
-                DIR *dp = opendir(seg ? dir.buf : ".");
-                if (dp) {
-                    struct dirent *de;
-                    while ((de = readdir(dp))) {
-                        if (strlen(de->d_name) < (size_t)wlen) continue;
-                        if (memcmp(de->d_name, prefix, wlen)) continue;
-                        Str full; str_init(&full);
-                        str_puts(&full, dir.buf);
-                        str_putc(&full, '/');
-                        str_puts(&full, de->d_name);
-                        if (access(full.buf, X_OK) == 0)
-                            vec_push(&matches, xstrdup(de->d_name));
-                        str_free(&full);
+        if (command_pos) {
+            /* builtins + functions + PATH lookup */
+            for (Builtin *b = builtins; b->name; b++)
+                if (strlen(b->name) >= (size_t)wlen && !memcmp(b->name, prefix, wlen))
+                    vec_push(&matches, xstrdup(b->name));
+            for (size_t i = map_next_used(&g_funs, 0); i < g_funs.cap; i = map_next_used(&g_funs, i + 1)) {
+                const char *nm = g_funs.keys[i];
+                if (strlen(nm) >= (size_t)wlen && !memcmp(nm, prefix, wlen))
+                    vec_push(&matches, xstrdup(nm));
+            }
+            const char *path = var_get("PATH");
+            if (path) {
+                Str dir; str_init(&dir);
+                for (const char *p = path; ; ) {
+                    const char *c = strchr(p, ':');
+                    size_t seg = c ? (size_t)(c - p) : strlen(p);
+                    str_clear(&dir);
+                    str_putn(&dir, p, seg);
+                    DIR *dp = opendir(seg ? dir.buf : ".");
+                    if (dp) {
+                        struct dirent *de;
+                        while ((de = readdir(dp))) {
+                            if (strlen(de->d_name) < (size_t)wlen) continue;
+                            if (memcmp(de->d_name, prefix, wlen)) continue;
+                            Str full; str_init(&full);
+                            str_puts(&full, seg ? dir.buf : ".");
+                            str_putc(&full, '/');
+                            str_puts(&full, de->d_name);
+                            if (access(full.buf, X_OK) == 0) vec_push(&matches, xstrdup(de->d_name));
+                            str_free(&full);
+                        }
+                        closedir(dp);
                     }
-                    closedir(dp);
+                    if (!c) break;
+                    p = c + 1;
                 }
-                if (!c) break;
-                p = c + 1;
+                str_free(&dir);
             }
-            str_free(&dir);
+            pad_space = 1;
         }
-        if (g_opt_autoopen) {
-            DIR *dp = opendir(".");
-            if (dp) {
-                struct dirent *de;
-                while ((de = readdir(dp))) {
-                    if (strlen(de->d_name) < (size_t)wlen) continue;
-                    if (memcmp(de->d_name, prefix, wlen)) continue;
-                    if (de->d_name[0] == '.' && prefix[0] != '.') continue;
-                    struct stat st;
-                    if (stat(de->d_name, &st) == 0 && !S_ISDIR(st.st_mode))
-                        vec_push(&matches, xstrdup(de->d_name));
-                }
-                closedir(dp);
-            }
-        }
-        pad_space = 1;
+        add_file_matches(&matches, ".", prefix, 0);
     } else {
         /* file completion with a directory part */
         Str dir; str_init(&dir);
         const char *slash = strrchr(prefix, '/');
         str_putn(&dir, prefix, (size_t)(slash - prefix) + 1);
         const char *base = slash + 1;
-        size_t bl = strlen(base);
-        DIR *dp = opendir(dir.len ? dir.buf : ".");
-        if (dp) {
-            struct dirent *de;
-            while ((de = readdir(dp))) {
-                if (strlen(de->d_name) < bl) continue;
-                if (memcmp(de->d_name, base, bl)) continue;
-                if (de->d_name[0] == '.' && base[0] != '.') continue;
-                Str full; str_init(&full);
-                str_puts(&full, dir.buf);
-                str_puts(&full, de->d_name);
-                struct stat st;
-                str_putc(&full, '\0');
-                if (stat(full.buf, &st) == 0 && S_ISDIR(st.st_mode))
-                    str_putc(&full, '/');
-                else
-                    str_putc(&full, ' ');
-                vec_push(&matches, str_done(&full));
-            }
-            closedir(dp);
-        }
+        add_file_matches(&matches, dir.buf, base, 1);
         str_free(&dir);
     }
     free(prefix);
@@ -282,6 +273,11 @@ static int complete_word(const char *buf, int pos, char **out) {
     fputs("\n", stdout);
     vec_free(&matches);
     return 2;
+}
+
+int edit_complete(const char *buf, int pos, char **out, int *common) {
+    if (common) *common = 0;
+    return complete_word(buf, pos, out);
 }
 
 /* ---------------- prompt construction ---------------- */
@@ -367,13 +363,6 @@ done:
 }
 
 /* ---------------- the main edit loop ---------------- */
-static int hexval(int c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 0;
-    return -1;
-}
-
 char *edit_getline(const char *prompt_raw) {
     if (!editor_ok) {
         /* not a terminal: plain line read */
