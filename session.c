@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -49,6 +50,26 @@ static char *sess_sock_path(const char *id) {
     str_printf(&s, "%s/%s.sock", d, id);
     free(d);
     return str_done(&s);
+}
+
+int session_list(void) {
+    char *dir = sess_dir();
+    DIR *dp = opendir(dir);
+    if (!dp) {
+        free(dir);
+        return 0;
+    }
+    struct dirent *de;
+    while ((de = readdir(dp))) {
+        size_t n = strlen(de->d_name);
+        if (n <= 5 || strcmp(de->d_name + n - 5, ".sock")) continue;
+        char *id = xstrndup(de->d_name, n - 5);
+        if (session_id_ok(id)) puts(id);
+        free(id);
+    }
+    closedir(dp);
+    free(dir);
+    return 0;
 }
 
 static void sess_whoami(Str *out) {

@@ -41,7 +41,7 @@ static void usage(void) {
 "  --help        print this help and exit\n"
 "  --self-test   run the built-in test suite and exit\n"
 "  --session ID  attach to (or start) shared session ID\n"
-"  --active-session  attach to (or start) the active session\n"
+"  --list-session    list shared session IDs\n"
 "  --new-session     start a new generated session\n"
 "                   detach from a session with Ctrl-S then Ctrl-D\n",
     stderr);
@@ -362,6 +362,7 @@ int main(int argc, char **argv) {
     const char *cmd = NULL;
     int opt_s = 0;
     int selftest = 0;
+    int list_sessions = 0;
     const char *session = NULL;
     char *owned_session = NULL;
 
@@ -387,7 +388,7 @@ int main(int argc, char **argv) {
             session = argv[++i];
             continue;
         }
-        if (!strcmp(argv[i], "--active-session")) { session = "active"; continue; }
+        if (!strcmp(argv[i], "--list-session")) { list_sessions = 1; continue; }
         if (!strcmp(argv[i], "--new-session")) { owned_session = new_session_id(); session = owned_session; continue; }
         if (!strcmp(argv[i], "-c")) {
             if (i + 1 >= argc) osh_die("-c: option requires an argument");
@@ -410,6 +411,7 @@ int main(int argc, char **argv) {
         }
     }
     if (selftest) run_self_test();
+    if (list_sessions) return session_list();
 
     if (session) {
         /* the session server inherits this process's shell state */

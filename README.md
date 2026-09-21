@@ -43,9 +43,10 @@ library and POSIX.
   and `trap` for `EXIT`, `INT`, `ERR`, `TERM`, `HUP`
 - **Globbing**: `*`, `?`, `[...]` with recursive directory expansion
 - **Shared sessions**: `osh --session ID` attaches to a session that survives
-  disconnects. The first attach starts a session server that owns the shell
-  state; attaching again takes the session over and tells the displaced client
-  who took it and how to reconnect
+  disconnects. `osh --new-session` starts a generated session, `osh --list-session`
+  lists session IDs, and Ctrl-S then Ctrl-D detaches without killing the session.
+  Attaching again takes the session over and tells the displaced client who took
+  it and how to reconnect
 
 ## Build & run
 
@@ -94,6 +95,8 @@ Interactive mode with login rc file (`~/.oshrc`):
 | `-x`   | print commands as they run (xtrace)             |
 | `-v`   | verbose: print input lines                      |
 | `--session ID` | attach to (or start) shared session ID  |
+| `--new-session` | start a generated shared session        |
+| `--list-session` | list shared session IDs                 |
 
 ## Project layout
 
