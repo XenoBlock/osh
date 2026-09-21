@@ -108,12 +108,13 @@ int lex_fill(Lexer *lx) {
     Str line; str_init(&line);
     int ok = reader_getline(lx->r, "> ", &line);
     if (!ok) { str_free(&line); lx->eof = 1; return 0; }
-    lx_buf_grow(lx, line.len + 1);
-    /* keep logical lines newline-terminated, but never start with one */
+    lx_buf_grow(lx, line.len + 2);
+    /* keep every logical line newline-terminated */
     if (lx->len > 0 && lx->buf[lx->len - 1] != '\n')
         lx->buf[lx->len++] = '\n';
     memcpy(lx->buf + lx->len, line.buf, line.len);
     lx->len += line.len;
+    lx->buf[lx->len++] = '\n';
     lx->buf[lx->len] = 0;
     lx->line_no++;
     str_free(&line);
@@ -287,7 +288,7 @@ void lex_next(Lexer *lx) {
         break;
     }
     /* optional leading fd number: 2>&1, 2>file, 1>&2 */
-    while (lx->len < lx->pos + 4) if (!lex_fill(lx)) break;
+    while (!lx->in_heredoc && lx->len < lx->pos + 4) if (!lex_fill(lx)) break;
     int lead_fd = -1;
     if (lx->pos < lx->len && isdigit((unsigned char)lx->buf[lx->pos]) &&
         lx->pos + 1 < lx->len &&
@@ -324,15 +325,30 @@ void lex_next(Lexer *lx) {
                     Str delim; str_init(&delim);
                     while (lx->pos < lx->len && isspace((unsigned char)lx->buf[lx->pos]) &&
                            lx->buf[lx->pos] != '\n') lx->pos++;
-                    const char *dstart = lx->buf + lx->pos;
-                    while (lx->pos < lx->len && lx->buf[lx->pos] != '\n')
+                    size_t doff = lx->pos;      /* delimiter start, as an offset */
+                    while (lx->pos < lx->len && lx->buf[lx->pos] != '\n' &&
+                           !strchr("|&;()<>	 ", lx->buf[lx->pos]))
                         str_putc(&delim, lx->buf[lx->pos++]);
-                    /* skip to the end of the command line before the body */
-                    while (lx->pos < lx->len && lx->buf[lx->pos] != '\n') lx->pos++;
-                    if (lx->pos < lx->len) lx->pos++;
+                    /* The rest of the command line (`| cat` in `<<E | cat`)
+                       still belongs to this command; the body starts on the
+                       next line and may already be buffered by the lookahead
+                       above. Read the body from there, then drop it so the
+                       parser only sees the tail. */
+                    size_t tail = lx->pos, nl = lx->pos;
+                    while (nl < lx->len && lx->buf[nl] != '\n') nl++;
+                    lx->pos = (nl < lx->len) ? nl + 1 : nl;
+                    lx->eof = 0;       /* the lexer may keep reading the input */
+                    lx->in_heredoc = 1;
                     tok->heredoc = lex_read_heredoc(lx, delim.buf ? delim.buf : "", strip);
+                    lx->in_heredoc = 0;
+                    /* drop the consumed body, keeping the tail text */
+                    if (lx->pos > nl) {
+                        memmove(lx->buf + nl, lx->buf + lx->pos, lx->len - lx->pos);
+                        lx->len -= lx->pos - nl;
+                    }
+                    lx->pos = tail;    /* replay the tail for the parser */
                     /* emit the delimiter as a word so the parser can see it */
-                    if (dstart < lx->buf + lx->pos) {
+                    if (doff < lx->len || delim.buf) {
                         word_add(&tok->word, delim.buf, 0);
                         tok->type = T_REDIR;   /* keep type; word is the delimiter */
                     }
@@ -355,12 +371,9 @@ void advance_token(Lexer *lx) {
 /* read one raw line for a heredoc body: first drain the already-lexed
    buffer, then read fresh lines from the reader */
 int lex_getline(Lexer *lx, Str *dst) {
-    if (lx->pos < lx->len) {
-        while (lx->pos < lx->len && lx->buf[lx->pos] != '\n')
-            str_putc(dst, lx->buf[lx->pos++]);
-        if (lx->pos < lx->len) lx->pos++;   /* consume the newline */
-        return 1;
-    }
+    while (lx->pos < lx->len && lx->buf[lx->pos] != '\n')
+        str_putc(dst, lx->buf[lx->pos++]);
+    if (lx->pos < lx->len) { lx->pos++; return 1; }   /* consumed a full line */
     return reader_getline(lx->r, "> ", dst);
 }
 

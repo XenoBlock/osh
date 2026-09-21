@@ -367,6 +367,9 @@ static int run_function(const char *name, int argc, char **argv) {
     scope_push();
     run_string(body);
     scope_pop();
+    /* flow control does not cross a function boundary: `return` ends this
+       function, it must not also stop the caller's command list. */
+    if (g_flow != FLOW_NONE) g_flow = FLOW_NONE;
     for (int i = 0; i < g_nposargs; i++) free(g_posargs[i]);
     free(g_posargs);
     g_posargs = old_pos;
@@ -749,7 +752,8 @@ static int exec_compound(Node *n, int bg) {
             char *word = v.len ? xstrdup((char *)vec_at(&v, 0)) : xstrdup("");
             vec_free(&v);
             rc = 0;
-            for (Node *b = n->a; b; b = b->b) {
+            int matched = 0;
+            for (Node *b = n->a; b && !matched; b = b->b) {
                 for (int i = 0; i < b->nargs; i++) {
                     Vec pv; vec_init(&pv);
                     expand_word(&b->args[i], &pv, 0);
@@ -757,7 +761,7 @@ static int exec_compound(Node *n, int bg) {
                     vec_free(&pv);
                     int hit = gmatch_c(word, pat);
                     free(pat);
-                    if (hit) { rc = exec_node(b->a, 0); break; }
+                    if (hit) { rc = exec_node(b->a, 0); matched = 1; break; }
                 }
                 if (g_flow != FLOW_NONE) break;
             }

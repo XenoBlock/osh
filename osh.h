@@ -172,6 +172,7 @@ typedef struct Lexer {
     int     have_peek;
     int     error;
     int     eof;
+    int     in_heredoc;     /* reading a body: suppress lookahead filling */
     /* character buffer: one physical line is appended at a time */
     char   *buf;
     size_t  pos, len, cap;

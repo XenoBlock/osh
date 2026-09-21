@@ -333,6 +333,7 @@ static Node *parse_case(Lexer *lx) {
 Node *parse_case_list(Lexer *lx) {
     /* each branch: (pattern) list ;; */
     Node *head = NULL, *tail = NULL;
+    while (tok_is(lx, T_NEWLINE)) advance(lx);
     while (tok_is(lx, T_WORD) && strcmp(word_raw(&lx->tok.word), "esac")) {
         Node *b = new_node(N_NONE);
         node_add_arg(b, &lx->tok.word);
@@ -353,6 +354,7 @@ Node *parse_case_list(Lexer *lx) {
         b->a = parse_list(lx);
         if (tok_is(lx, T_SEMI) && !strcmp(lx->tok.op, ";;")) advance(lx);
         if (head) { tail->b = b; tail = b; } else { head = tail = b; }
+        while (tok_is(lx, T_NEWLINE)) advance(lx);
     }
     return head;
 }
@@ -471,6 +473,7 @@ static Node *parse_pipeline(Lexer *lx) {
     Node *left = parse_command(lx);
     while (tok_is(lx, T_PIPE)) {
         advance(lx);
+        while (tok_is(lx, T_NEWLINE)) advance(lx);   /* `cmd |` <newline> `cmd` */
         Node *right = parse_command(lx);
         Node *p = new_node(N_PIPE);
         p->a = left; p->b = right;
@@ -485,6 +488,7 @@ static Node *parse_andor(Lexer *lx) {
         if (tok_is(lx, T_AND) || tok_is(lx, T_OR)) {
             int kind = tok_is(lx, T_AND) ? N_AND : N_OR;
             advance(lx);
+            while (tok_is(lx, T_NEWLINE)) advance(lx);   /* `cmd &&` <newline> `cmd` */
             Node *right = parse_pipeline(lx);
             Node *n = new_node(kind);
             n->a = left; n->b = right;
@@ -515,27 +519,34 @@ static int is_list_end(Lexer *lx) {
 
 static Node *parse_list(Lexer *lx) {
     Node *head = NULL, *tail = NULL;
-    int bg = 0;
     for (;;) {
-        if (is_list_end(lx)) {
-            if (tok_is(lx, T_AMP)) { bg = 1; advance(lx); }
-            else if (tok_is(lx, T_SEMI) || tok_is(lx, T_NEWLINE)) advance(lx);
-            break;
+        /* Newlines and `;` separate commands, so they are consumed here rather
+           than ending the list. Only a real terminator (EOF, `)`, `}`, or one of
+           the do/done/then/fi/esac words) ends it -- that is what lets a compound
+           command span several lines, e.g. `while ...; do` <newline> `...; done`. */
+        if (tok_is(lx, T_NEWLINE) || tok_is(lx, T_SEMI)) {
+            if (tok_is(lx, T_SEMI) && !strcmp(lx->tok.op, ";;")) break;  /* case branch */
+            advance(lx);
+            continue;
         }
+        if (is_list_end(lx)) break;
         Node *n = parse_andor(lx);
         if (!n) break;
-        if (bg) { Node *g = new_node(N_BG); g->a = n; n = g; bg = 0; }
+        int bg = 0;
+        if (tok_is(lx, T_AMP)) { bg = 1; advance(lx); }   /* `cmd &` backgrounds cmd */
+        if (bg) {
+            Node *g = new_node(N_BG);
+            g->a = n;
+            n = g;
+        }
         if (head) {
             Node *seq = new_node(N_SEQ);
             seq->a = tail; seq->b = n;
             head = tail = seq;
         } else { head = tail = n; }
-        if (tok_is(lx, T_AMP)) { bg = 1; advance(lx); }
-        else if (tok_is(lx, T_SEMI) || tok_is(lx, T_NEWLINE)) {
-            if (!strcmp(lx->tok.op, ";;")) break;   /* case branch terminator */
-            advance(lx);
-        }
-        else if (!is_list_end(lx)) break;
+        if (bg) continue;                                  /* separators handled at the top */
+        if (tok_is(lx, T_SEMI) || tok_is(lx, T_NEWLINE)) continue;
+        if (!is_list_end(lx)) break;                       /* missing separator */
     }
     return head;
 }

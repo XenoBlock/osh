@@ -240,7 +240,9 @@ static int b_kill(int argc, char **argv) {
         if (++i >= argc) { fprintf(stderr, "osh: kill: -s needs a signal\n"); return 1; }
         sig = atoi(argv[i++]);
     } else if (argv[i][0] == '-') sig = atoi(argv[i++] + 1);
-    if (sig < 1 || sig > NSIG) { fprintf(stderr, "osh: kill: invalid signal %d\n", sig); return 1; }
+    /* 0 is the POSIX liveness probe, so it is a valid "signal" here */
+    if (sig < 0 || sig > NSIG) { fprintf(stderr, "osh: kill: invalid signal %d\n", sig); return 1; }
+    if (i >= argc) { fprintf(stderr, "osh: kill: usage: kill [-s sig] pid|job\n"); return 1; }
     for (; i < argc; i++) {
         pid_t pid;
         if (argv[i][0] == '%') pid = job_pid(atoi(argv[i] + 1));

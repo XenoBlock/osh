@@ -278,6 +278,47 @@ static void test_hardening(void) {
     rmdir(dir);
 }
 
+/* list parsing: separators, multi-line compound bodies, `&`, and the
+   function/`case` scoping that was wrong alongside them */
+static void test_parse_flow(void) {
+    /* a compound command may span lines */
+    run_string("n=0\nwhile [ $n -lt 3 ]; do\nn=$((n+1))\ndone");
+    check_str("multiline while body", var_get("n"), "3");
+    run_string("acc=\nfor x in a b; do\nacc=$acc$x\ndone");
+    check_str("multiline for body", var_get("acc"), "ab");
+    run_string("if true; then\nmk=yes\nfi");
+    check_str("multiline if body", var_get("mk"), "yes");
+    run_string("g() {\n  true\n  return 9\n}\ng");
+    check_int("multiline function body", g_status, 9);
+    run_string("echo q |\ncat >/dev/null; pl=1");
+    check_str("newline after pipe", var_get("pl"), "1");
+    run_string("case b in\n  a) cs=A\n     ;;\n  b) cs=B\n     ;;\nesac");
+    check_str("multiline case", var_get("cs"), "B");
+
+    /* `cmd &` at the end of a line must not swallow the next line */
+    run_string("true &\nmarker=yes");
+    check_str("command after `&' newline", var_get("marker"), "yes");
+    run_string("true &\nbgpid=$!");
+    check_int("`&' sets $!", var_get("bgpid") && atoi(var_get("bgpid")) > 0, 1);
+
+    /* only the first matching case branch runs */
+    run_string("case abc in a*c) cm=M;; *) cm=N;; esac");
+    check_str("case stops at first match", var_get("cm"), "M");
+
+    /* `return` ends the function, not the caller's list */
+    run_string("rf() { return 3; }; rf; rr=$?");
+    check_str("list continues after return", var_get("rr"), "3");
+
+    /* here-documents: the body is read past the delimiter line and the rest of
+       the command line still belongs to the command */
+    run_string("hd=$(cat <<E\nbody-line\nE\n)");
+    check_str("simple heredoc", var_get("hd"), "body-line");
+    run_string("hd2=$(cat <<E | cat\npipe-body\nE\n)");
+    check_str("heredoc with a pipe tail", var_get("hd2"), "pipe-body");
+    run_string("hd3=$(cat <<E > /dev/null; echo tail\nbody3\nE\n)");
+    check_str("heredoc keeps the command tail", var_get("hd3"), "tail");
+}
+
 static void run_self_test(void) {
     fprintf(stderr, "osh " OSH_VERSION " self-test\n");
     test_arith();
@@ -288,6 +329,7 @@ static void run_self_test(void) {
     test_expansion();
     test_param_expansion();
     test_hardening();
+    test_parse_flow();
     fprintf(stderr, "%d tests, %d failures\n", tests_run, tests_fail);
     exit(tests_fail ? 1 : 0);
 }
