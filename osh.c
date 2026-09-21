@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <pwd.h>
+#include <time.h>
 
 FILE *g_out = NULL;
 static char *g_name = "osh";
@@ -25,6 +26,7 @@ static void usage(void) {
     fputs(
 "osh " OSH_VERSION " - Oricade Shell\n"
 "        >.-\n"
+"       Oricade\n"
 "Usage: osh [options] [command | script]\n"
 "  -c cmd        run the string `cmd' and exit\n"
 "  -s            read commands from stdin (default with no script file)\n"
@@ -38,7 +40,10 @@ static void usage(void) {
 "  --version     print version and exit\n"
 "  --help        print this help and exit\n"
 "  --self-test   run the built-in test suite and exit\n"
-"  --session ID  attach to (or start) shared session ID\n",
+"  --session ID  attach to (or start) shared session ID\n"
+"  --active-session  attach to (or start) the active session\n"
+"  --new-session     start a new generated session\n"
+"                   detach from a session with Ctrl-S then Ctrl-D\n",
     stderr);
 }
 
@@ -52,6 +57,12 @@ static void run_file(FILE *f) {
         node_free(n);
         if (g_flow != FLOW_NONE) break;
     }
+}
+
+static char *new_session_id(void) {
+    Str s; str_init(&s);
+    str_printf(&s, "s-%ld-%ld", (long)time(NULL), (long)getpid());
+    return str_done(&s);
 }
 
 static void run_interactive(void) {
@@ -352,6 +363,7 @@ int main(int argc, char **argv) {
     int opt_s = 0;
     int selftest = 0;
     const char *session = NULL;
+    char *owned_session = NULL;
 
     setenv("SHELL", "osh", 0);
     var_import_env();
@@ -375,6 +387,8 @@ int main(int argc, char **argv) {
             session = argv[++i];
             continue;
         }
+        if (!strcmp(argv[i], "--active-session")) { session = "active"; continue; }
+        if (!strcmp(argv[i], "--new-session")) { owned_session = new_session_id(); session = owned_session; continue; }
         if (!strcmp(argv[i], "-c")) {
             if (i + 1 >= argc) osh_die("-c: option requires an argument");
             cmd = argv[++i];
@@ -400,7 +414,9 @@ int main(int argc, char **argv) {
     if (session) {
         /* the session server inherits this process's shell state */
         load_rc();
-        return session_client(session);
+        int rc = session_client(session);
+        free(owned_session);
+        return rc;
     }
 
     if (cmd) {

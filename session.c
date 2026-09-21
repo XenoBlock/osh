@@ -256,7 +256,7 @@ int session_client(const char *id) {
 
     char pend[8192];
     size_t plen = 0;
-    int ready = 0, taken = 0;
+    int ready = 0, taken = 0, saw_ctrl_s = 0;
     char taker[128] = "";
 
     for (;;) {
@@ -308,7 +308,24 @@ int session_client(const char *id) {
             char buf[1024];
             ssize_t r = read(0, buf, sizeof buf);
             if (r <= 0) break;                      /* local stdin closed */
-            if (write_all(fd, buf, (size_t)r) != 0) break;
+            Str out; str_init(&out);
+            for (ssize_t i = 0; i < r; i++) {
+                unsigned char c = (unsigned char)buf[i];
+                if (saw_ctrl_s) {
+                    if (c == 4) {                    /* Ctrl-S then Ctrl-D: detach */
+                        str_free(&out);
+                        close(fd);
+                        printf("\nDetached from session %s\n", id);
+                        return 0;
+                    }
+                    str_putc(&out, 19);
+                    saw_ctrl_s = 0;
+                }
+                if (c == 19) saw_ctrl_s = 1;         /* Ctrl-S */
+                else str_putc(&out, (char)c);
+            }
+            if (out.len && write_all(fd, out.buf, out.len) != 0) { str_free(&out); break; }
+            str_free(&out);
         }
     }
     close(fd);
