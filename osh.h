@@ -126,7 +126,7 @@ void clear_shell_options_from(const char *s);
 char *do_word_expansion(const char *raw, int allow_split_and_glob, Vec *out);
 
 /* command substitution $(...) and `...` */
-char *capture_subshell(const char *body, int capture_output);
+char *capture_subshell(const char *body);
 
 /* run a string of shell code in the current process (used by $( ) and eval) */
 void run_string(const char *code);
@@ -285,7 +285,6 @@ char *prompt_string(const char *ps);        /* expand PS escapes */
 int session_client(const char *id);         /* attach to (or start) a session */
 int session_id_ok(const char *id);          /* conservative id -> file name check */
 int session_list(void);                     /* print live session IDs */
-void  edit_disable(void);
 int   edit_complete(const char *buf, int pos, char **out, int *common);
 
 /* ---------- exec.c extras ---------- */

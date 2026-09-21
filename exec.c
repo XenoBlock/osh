@@ -617,8 +617,6 @@ int is_builtin_safe(Node *n) {
 }
 
 /* ---------- compound commands ---------- */
-static int exec_list(Node *n);   /* forward */
-
 static int exec_compound(Node *n, int bg) {
     switch (n->kind) {
     case N_NONE: return 0;
@@ -831,8 +829,6 @@ int exec_node(Node *n, int bg) {
     }
     return rc;
 }
-
-static int exec_list(Node *n) { return exec_node(n, 0); }
 
 /* run shell source text in the current process */
 void run_string(const char *code) {

@@ -365,7 +365,7 @@ static long long ap_var_get(const char *st, const char *en) {
     long long val;
     if (!v || !*v) val = 0;
     else {
-        AP a = { v };
+        AP a = { v, 0 };
         val = ap_expr(&a);
     }
     free(nm);
@@ -754,7 +754,7 @@ static char *expand_param_body(const char *body) {
 char *expand_param_str(const char *body) { return expand_param_body(body); }
 
 /* ---------- command substitution ---------- */
-char *capture_subshell(const char *body, int capture_output) {
+char *capture_subshell(const char *body) {
     int fds[2];
     if (pipe(fds) != 0) return NULL;
     pid_t pid = fork();
@@ -848,7 +848,7 @@ void expand_into(const char *raw, int qmode, Str *cur, Str *qmask) {
                 p++;
             }
             char *body = xstrndup(st, p - st);
-            char *r = capture_subshell(body, 1);
+            char *r = capture_subshell(body);
             free(body);
             if (r) {
                 size_t rl = strlen(r);
@@ -947,7 +947,7 @@ void expand_into(const char *raw, int qmode, Str *cur, Str *qmask) {
             const char *st = p;
             while (*p && *p != '`') p++;
             char *body = xstrndup(st, p - st);
-            char *r = capture_subshell(body, 1);
+            char *r = capture_subshell(body);
             free(body);
             if (r) {
                 size_t rl = strlen(r);

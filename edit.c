@@ -106,8 +106,6 @@ void edit_init(void) {
     atexit(edit_save_history);
 }
 
-void edit_disable(void) { editor_ok = 0; }
-
 /* ---------------- rendering ---------------- */
 static void refresh(const char *prompt, const char *buf, int pos, int len) {
     /* redraw the line: \r, prompt, text, clear to end, place cursor */
